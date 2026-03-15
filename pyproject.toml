@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "yt-tts"
+version = "0.1.0"
+description = "Turn text into audio by stitching YouTube clips"
+requires-python = ">=3.11"
+dependencies = [
+    "yt-dlp>=2024.1.0",
+    "youtube-transcript-api>=0.6.0",
+    "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+bootstrap = [
+    "huggingface-hub>=0.20.0",
+    "pyarrow>=21.0.0",
+]
+stable-ts = ["stable-ts>=2.16.0"]
+whisperx = ["whisperx>=3.1.0"]
+dev = ["pytest>=8.0", "pytest-cov>=4.1", "ruff>=0.2.0"]
+
+[project.scripts]
+yt-tts = "yt_tts.cli.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/yt_tts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: tests requiring network access"]

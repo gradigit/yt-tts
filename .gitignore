@@ -1,0 +1,46 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Data
+*.db
+*.sqlite
+*.sqlite3
+
+# Cache
+.cache/
+
+# Cookies (contains auth tokens - never commit)
+cookies.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Spikes output
+spikes/*.json3
+spikes/*.m4a
+spikes/*.mp3
+spikes/*.wav

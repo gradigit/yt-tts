@@ -1,0 +1,52 @@
+{
+  "wireMagic": "pb3",
+  "pens": [],
+  "wsWinStyles": [],
+  "wpWinPositions": [],
+  "events": [
+    {
+      "tStartMs": 1000,
+      "dDurationMs": 3000,
+      "segs": [
+        {"utf8": "Hello", "tOffsetMs": 0, "acAsrConf": 200},
+        {"utf8": " world", "tOffsetMs": 500, "acAsrConf": 180},
+        {"utf8": " this", "tOffsetMs": 1000, "acAsrConf": 190}
+      ]
+    },
+    {
+      "tStartMs": 4000,
+      "dDurationMs": 2000,
+      "segs": [
+        {"utf8": "is", "tOffsetMs": 0, "acAsrConf": 210},
+        {"utf8": " a", "tOffsetMs": 300, "acAsrConf": 220},
+        {"utf8": " test", "tOffsetMs": 600, "acAsrConf": 250}
+      ]
+    },
+    {
+      "tStartMs": 7000,
+      "dDurationMs": 4000,
+      "segs": [
+        {"utf8": "and", "tOffsetMs": 0, "acAsrConf": 195},
+        {"utf8": " it's", "tOffsetMs": 400, "acAsrConf": 175},
+        {"utf8": " working", "tOffsetMs": 900, "acAsrConf": 230},
+        {"utf8": " great", "tOffsetMs": 1500, "acAsrConf": 240}
+      ]
+    },
+    {
+      "tStartMs": 12000,
+      "dDurationMs": 1000,
+      "segs": [
+        {"utf8": "\n"}
+      ]
+    },
+    {
+      "tStartMs": 13000,
+      "dDurationMs": 3000,
+      "segs": [
+        {"utf8": "don't", "tOffsetMs": 0, "acAsrConf": 200},
+        {"utf8": " stop", "tOffsetMs": 500, "acAsrConf": 215},
+        {"utf8": " now", "tOffsetMs": 1000, "acAsrConf": 205}
+      ]
+    }
+  ]
+}
