@@ -4,12 +4,12 @@ YouTube Text-to-Speech — turns any text into audio by finding and stitching Yo
 
 ## Build Commands
 ```
-pip install -e .              # install in dev mode (includes faster-whisper, curl_cffi)
+pip install -e .              # install (includes faster-whisper, curl_cffi, torchaudio)
 pip install -e ".[dev]"       # + test deps (pytest, ruff)
 pip install -e ".[bootstrap]" # + bootstrap deps (huggingface_hub, pyarrow)
-yt-tts "hello world"          # basic usage (requires populated index)
+yt-tts "hello world"          # synthesize (requires populated index)
 yt-tts --video URL "hello"    # use specific video (no index needed)
-yt-tts index init             # download YouTube-Commons + build index
+yt-tts index init             # download YouTube-Commons (3.15M transcripts)
 yt-tts index search "phrase"  # search the index
 yt-tts batch phrases.txt -o clips/  # batch mode
 pytest                        # run tests (116 unit tests)
@@ -20,55 +20,61 @@ ruff check src/yt_tts/        # lint
 ```
 yt-tts/
 ├── src/yt_tts/
-│   ├── __init__.py           # version
-│   ├── config.py             # Config dataclass
+│   ├── config.py             # Config dataclass (all settings)
 │   ├── types.py              # WordTimestamp, SearchResult, ClipInfo, ChunkPlan, SynthesisResult
 │   ├── exceptions.py         # YtTtsError hierarchy
 │   ├── core/
-│   │   ├── index.py          # TranscriptIndex (SQLite FTS5)
-│   │   ├── bootstrap.py      # YouTube-Commons download + ingest
-│   │   ├── crawl.py          # add-channel, add-video
-│   │   ├── search.py         # High-level search (index + live)
+│   │   ├── asr.py            # Cross-platform ASR backend (CUDA/MLX/CPU) + CTC forced alignment
+│   │   ├── align.py          # Download audio + align/transcribe + locate phrase
+│   │   ├── pipeline.py       # Orchestrator: search → align → extract → verify → stitch
+│   │   ├── index.py          # TranscriptIndex (SQLite FTS5, 3.15M transcripts)
+│   │   ├── search.py         # FTS5 search + multi-candidate retrieval
+│   │   ├── chunk.py          # Bumblebee greedy longest-match + verify-retry resolution
+│   │   ├── extract.py        # Clip download (yt-dlp stream URL + ffmpeg) + tightness control
+│   │   ├── stitch.py         # Gentle loudnorm (±6 LU window) + concat + crossfade
+│   │   ├── bootstrap.py      # YouTube-Commons parquet download + ingest (597 files)
 │   │   ├── captions.py       # json3 + transcript-api + page-scrape fetching
 │   │   ├── timestamps.py     # json3 parsing, phrase location
-│   │   ├── extract.py        # Clip download (stream URL + ffmpeg)
-│   │   ├── align.py          # Whisper alignment (faster-whisper, GPU auto-detect)
-│   │   ├── stitch.py         # loudnorm + concat + crossfade
-│   │   ├── chunk.py          # Bumblebee greedy longest-match
-│   │   ├── pipeline.py       # Orchestrator: text → audio
+│   │   ├── crawl.py          # add-channel, add-video
 │   │   ├── cache.py          # CaptionCache + ClipCache
-│   │   ├── deps.py           # External dependency checking
+│   │   ├── deps.py           # ffmpeg/yt-dlp dependency checking
 │   │   └── ratelimit.py      # RateLimiter, CircuitBreaker, InvocationBudget
 │   └── cli/
 │       ├── app.py            # CLI entry point (manual arg parsing)
-│       ├── commands/
-│       │   ├── synthesize.py # Single synthesis
-│       │   ├── batch.py      # Batch synthesis from file
-│       │   ├── index.py      # Index management
-│       │   └── cache.py      # Cache management
+│       ├── commands/          # synthesize, batch, index, cache
 │       └── output.py         # JSON formatter
-├── tests/
-│   ├── unit/                 # 116 tests, no network/external tools
-│   ├── integration/          # Requires network + ffmpeg
-│   └── fixtures/
+├── tests/unit/               # 116 tests (align, cache, chunk, cli, index, pipeline, ratelimit, stitch, timestamps)
+├── spikes/                   # Validation spikes (FTS5, json3, alignment benchmark, phoneme stitching)
+├── architect/                # Research findings, alternative sources reference
 ├── skill/SKILL.md            # Claude Code skill (symlinked to ~/.claude/skills/yt-tts)
-├── data/starter_channels.json
-└── pyproject.toml
+├── ytp/                      # YTP video project (renderer, visuals, build scripts)
+└── pyproject.toml            # MIT license, hatchling build
 ```
 
-## Conventions
-- `src/yt_tts/` layout with hatchling build
-- Python >=3.11, sync + ThreadPoolExecutor for concurrency
-- SQLite FTS5 with `tokenchars "'"` for contraction support
-- ffmpeg for audio processing, yt-dlp for YouTube interaction
-- faster-whisper (tiny model, GPU auto-detect) for timestamp alignment
-- Persistent circuit breaker: skips caption APIs after first 429, goes straight to Whisper
-- No arbitrary limits on input length or clip count
-- Multilingual support (YouTube-Commons has all languages, Whisper auto-detects)
-- Lint: ruff (line-length=100, py311)
+## Pipeline Architecture
+```
+search (FTS5, multi-candidate) → estimate position (word-index ratio)
+  → download audio (yt-dlp stream URL) → CTC forced alignment (known text → timestamps)
+  → extract clip (ffmpeg) → verify with ASR (reject misaligned) → retry next candidate if failed
+  → stitch (gentle loudnorm + crossfade) → output MP3/WAV
+```
 
-## Current State
-- 116 unit tests passing, lint clean
-- YouTube-Commons bootstrap downloading (597 parquet files → ~22.7M transcripts)
-- Full CRT pipeline tested in YTP video project (ytp/)
-- Claude Code skill installed at ~/.claude/skills/yt-tts
+## Key Design Decisions
+- **CTC forced alignment over ASR**: We already know the text (from the index), so we skip recognition entirely. ctc_forced_aligner + MMS_FA gives ~30ms boundary accuracy vs ~200ms for Whisper.
+- **Verify-then-retry**: After extracting a clip, ASR-verify it matches the expected phrase. If not, try the next search result (up to 5 candidates).
+- **Gentle normalization**: ±6 LU window preserves natural volume variation between speakers. Only extreme clips get adjusted. alimiter prevents clipping.
+- **Persistent circuit breaker**: After one YouTube 429, skips all caption APIs for 1 hour and goes straight to local alignment.
+- **Cross-platform ASR** (asr.py): CUDA (faster-whisper) → MLX (parakeet-mlx/mlx-whisper) → CPU (faster-whisper). Auto-detects at runtime.
+
+## Conventions
+- `src/yt_tts/` layout, hatchling build, Python >=3.11
+- SQLite FTS5 with `tokenchars "'"` for contraction support (WAL mode, thread-safe)
+- No arbitrary limits on input length or clip count
+- Lint: ruff (line-length=100, select E,F,W,I)
+- Tests: pytest, 116 unit tests, all passing
+
+## Current State (v0.2.0)
+- YouTube-Commons bootstrap complete: 3,156,663 transcripts, 58GB database
+- 10/10 stress test phrases pass ASR verification
+- Phoneme stitching POC: word-level works (4/5 exact), phoneme-level needs PSOLA/vocoder (V2)
+- GitHub: https://github.com/gradigit/yt-tts
