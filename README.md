@@ -5,6 +5,10 @@
 Every word comes from a different YouTube video. An art project giving AI agents "the voice of the internet."
 
 ```bash
+curl -LsSf https://raw.githubusercontent.com/gradigit/yt-tts/master/install.sh | sh
+```
+
+```bash
 yt-tts "the meaning of life"
 # → yt-tts-a1b2c3d4.mp3 (clips from 4 different YouTubers)
 ```
