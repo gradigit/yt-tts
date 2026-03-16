@@ -11,18 +11,19 @@ yt-tts "the meaning of life"
 
 ## How It Works
 
-1. **Search** — Finds your phrase in 22.7M YouTube transcripts (SQLite FTS5 index)
+1. **Search** — Finds your phrase in 3.15M YouTube transcripts (SQLite FTS5 index)
 2. **Chunk** — Greedy longest-match: "never gonna give you up" = 1 clip, not 5 words
-3. **Align** — Downloads audio, runs Whisper locally for word-level timestamps
+3. **Align** — Downloads audio, runs CTC forced alignment (MMS_FA) for ~30ms word boundaries
 4. **Extract** — ffmpeg cuts the exact segment from the YouTube stream
-5. **Stitch** — Loudness normalization + crossfade into a single MP3
+5. **Verify** — ASR-verifies the clip matches expected text; retries with next candidate if not
+6. **Stitch** — Gentle loudness normalization (±6 LU) + crossfade into a single MP3
 
-No YouTube API key needed. No rate limits (Whisper runs locally).
+No YouTube API key needed. All alignment runs locally.
 
 ## Install
 
 ```bash
-pip install yt-tts
+uv pip install yt-tts
 ```
 
 **Requirements:** Python 3.11+, [ffmpeg](https://ffmpeg.org/download.html), [yt-dlp](https://github.com/yt-dlp/yt-dlp)
@@ -31,9 +32,9 @@ pip install yt-tts
 
 ```bash
 # Build the transcript index (downloads from YouTube-Commons on HuggingFace)
-pip install yt-tts[bootstrap]
+uv pip install "yt-tts[bootstrap]"
 yt-tts index init --subset 1  # ~27K transcripts from 1 parquet file
-yt-tts index init              # full 22.7M transcripts (needs ~120GB disk)
+yt-tts index init              # full 3.15M transcripts (needs ~58GB disk)
 
 # Synthesize
 yt-tts "hello world"
@@ -103,7 +104,7 @@ Subcommands:
       "start_ms": 42611,
       "end_ms": 44791,
       "confidence": 0.84,
-      "timestamp_source": "whisper"
+      "timestamp_source": "ctc_alignment"
     }
   ],
   "missing_words": [],
@@ -125,11 +126,12 @@ Text input
   │  ├─ Search FTS5 index → video_id
   │  ├─ Estimate position from word index
   │  ├─ Download audio segment (yt-dlp stream URL)
-  │  ├─ Whisper alignment → precise timestamps
-  │  └─ ffmpeg extract clip
+  │  ├─ CTC forced alignment (known text → timestamps, ~30ms accuracy)
+  │  ├─ ffmpeg extract clip
+  │  └─ ASR verify → retry next candidate if mismatch
   │
   ▼ stitch_clips()
-  │  ├─ EBU R128 loudness normalization (dual-pass loudnorm)
+  │  ├─ Gentle loudness normalization (±6 LU window)
   │  ├─ Silence gaps for missing words
   │  └─ Concat + crossfade
   │
@@ -149,18 +151,14 @@ print(result.missing_words)  # Words not found
 print(result.exit_code)      # 0, 1, 2, or 3
 ```
 
-## How It Avoids Rate Limits
-
-YouTube's caption API aggressively rate-limits. yt-tts has a multi-layer fallback:
-
-1. **YouTube-Commons index** — 22.7M transcripts pre-downloaded from HuggingFace. Zero YouTube API calls for search.
-2. **Whisper alignment** — Downloads audio (not rate-limited) and transcribes locally with faster-whisper. No caption API needed.
-3. **Persistent circuit breaker** — After one 429, skips all caption APIs for 1 hour and goes straight to Whisper.
-4. **Cookie support** — `--cookies` / `--cookies-from-browser` for authenticated sessions if needed.
-
 ## GPU Acceleration
 
-yt-tts auto-detects CUDA GPUs for Whisper. With a GPU, synthesis takes ~7s per clip. On CPU, ~12s.
+yt-tts auto-detects the best compute backend:
+- **NVIDIA GPU** — faster-whisper (CUDA) for ASR verification
+- **Apple Silicon** — parakeet-mlx or mlx-whisper (Metal)
+- **CPU** — faster-whisper (int8 quantized)
+
+CTC forced alignment runs on CPU and is fast (~100ms per clip). ASR verification is the GPU-accelerated step.
 
 ## Disclaimer
 

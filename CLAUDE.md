@@ -4,9 +4,9 @@ YouTube Text-to-Speech — turns any text into audio by finding and stitching Yo
 
 ## Build Commands
 ```
-pip install -e .              # install (includes faster-whisper, curl_cffi, torchaudio)
-pip install -e ".[dev]"       # + test deps (pytest, ruff)
-pip install -e ".[bootstrap]" # + bootstrap deps (huggingface_hub, pyarrow)
+uv pip install -e .              # install (includes faster-whisper, curl_cffi, torchaudio)
+uv pip install -e ".[dev]"       # + test deps (pytest, ruff)
+uv pip install -e ".[bootstrap]" # + bootstrap deps (huggingface_hub, pyarrow)
 yt-tts "hello world"          # synthesize (requires populated index)
 yt-tts --video URL "hello"    # use specific video (no index needed)
 yt-tts index init             # download YouTube-Commons (3.15M transcripts)
@@ -63,7 +63,7 @@ search (FTS5, multi-candidate) → estimate position (word-index ratio)
 - **CTC forced alignment over ASR**: We already know the text (from the index), so we skip recognition entirely. ctc_forced_aligner + MMS_FA gives ~30ms boundary accuracy vs ~200ms for Whisper.
 - **Verify-then-retry**: After extracting a clip, ASR-verify it matches the expected phrase. If not, try the next search result (up to 5 candidates).
 - **Gentle normalization**: ±6 LU window preserves natural volume variation between speakers. Only extreme clips get adjusted. alimiter prevents clipping.
-- **Persistent circuit breaker**: After one YouTube 429, skips all caption APIs for 1 hour and goes straight to local alignment.
+- **Persistent circuit breaker**: After one YouTube 429 during crawling, skips caption APIs for 1 hour (crawl-only concern, not used during synthesis).
 - **Cross-platform ASR** (asr.py): CUDA (faster-whisper) → MLX (parakeet-mlx/mlx-whisper) → CPU (faster-whisper). Auto-detects at runtime.
 
 ## Conventions

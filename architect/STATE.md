@@ -14,8 +14,8 @@
 - Starter channel list for "voice of the internet" beyond CC-BY content
 - Monorepo: core lib + CLI wrapper + web wrapper (V1 = core + CLI only)
 - Accuracy over speed — exact phrase match is top priority
-- json3 word timestamps as default alignment (no GPU needed)
-- stable-ts as opt-in alignment, WhisperX for max precision
+- CTC forced alignment as primary (ctc_forced_aligner + MMS_FA, ~30ms accuracy)
+- Whisper as fallback for ASR verification
 - Output: MP4 or audio-only (user choice)
 - Agent interface: CLI subprocess, --json flag
 - Production quality from start

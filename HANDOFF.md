@@ -28,7 +28,6 @@ The critical insight: since we already know the transcript text (from the index)
 ### What doesn't work yet
 - Phoneme-level stitching: word-level is reliable (4/5 exact), phoneme splicing creates "sh" artifacts. Needs PSOLA/WORLD vocoder (V2)
 - Some long-video estimation is still off — the word-position estimation can miss by minutes on 5+ minute videos
-- `torchaudio.functional.forced_align` is deprecated in 2.8, removed in 2.9 — needs migration
 
 ### Unfinished / Deferred
 - People's Speech dataset: 2.12 TB, utterance-level only — too large for now

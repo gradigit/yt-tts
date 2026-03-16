@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yt-tts"
-version = "0.1.0"
+version = "0.2.0"
 description = "Turn text into audio by stitching YouTube clips"
 readme = "README.md"
 license = {text = "MIT"}
@@ -28,8 +28,8 @@ dev = ["pytest>=8.0", "pytest-cov>=4.1", "ruff>=0.2.0"]
 yt-tts = "yt_tts.cli.app:main"
 
 [project.urls]
-Homepage = "https://github.com/placeholder/yt-tts"
-Repository = "https://github.com/placeholder/yt-tts"
+Homepage = "https://github.com/gradigit/yt-tts"
+Repository = "https://github.com/gradigit/yt-tts"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/yt_tts"]

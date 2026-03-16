@@ -110,22 +110,23 @@ yt-tts index search "phrase to find"
 yt-tts index add-video "https://youtube.com/watch?v=VIDEO_ID"
 
 # Bootstrap from YouTube-Commons (large dataset, ~600MB per parquet file)
-pip install yt-tts[bootstrap]
+uv pip install "yt-tts[bootstrap]"
 yt-tts index init --subset 1
 ```
 
 ## How It Works
 
-1. **Search** — FTS5 phrase search across indexed transcripts
+1. **Search** — FTS5 phrase search across 3.15M indexed transcripts
 2. **Chunk** — Greedy longest-match splitting ("never gonna give you up" = 1 chunk, not 5 words)
-3. **Timestamp** — Whisper transcribes downloaded audio locally for precise word timing
+3. **Align** — CTC forced alignment (known text → ~30ms word boundaries, no ASR needed)
 4. **Extract** — ffmpeg cuts the exact audio segment from YouTube stream
-5. **Stitch** — Loudness normalization + crossfade + concat into final output
+5. **Verify** — ASR-verifies clip matches expected text; retries with next candidate if not
+6. **Stitch** — Gentle loudness normalization (±6 LU) + crossfade + concat into final output
 
 ## Limitations
 
 - Requires indexed transcripts (or `--video` for single-video mode)
-- ~10-25 seconds per synthesis depending on chunk count (Whisper alignment is the main cost; GPU accelerated when available)
+- ~10-25 seconds per synthesis depending on chunk count (audio download + alignment + verification)
 - Quality depends on source audio (some YouTube videos have background noise/music)
 - Longer inputs work fine — they just take proportionally longer
 
@@ -135,7 +136,7 @@ If synthesis fails:
 1. Check `exit_code` and `missing_words` in JSON output
 2. If exit 2 (no matches): the words aren't in the index. Try `--video URL` with a specific video, or add more videos with `yt-tts index add-video`
 3. If exit 3 (system error): check that ffmpeg and yt-dlp are installed
-4. If clips sound wrong: the Whisper alignment may have matched incorrectly. Try a different phrase or add `--verbose` to debug
+4. If clips sound wrong: the alignment may have matched incorrectly. Try a different phrase or add `--verbose` to debug
 
 ## Example Agent Workflow
 

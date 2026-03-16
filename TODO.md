@@ -1,46 +1,33 @@
 # TODO
 
-## Milestone 1: Fix All Bugs + Dependencies
-- [ ] Add faster-whisper, curl_cffi to pyproject.toml dependencies
-- [ ] Fix --voice flag (resolve channel URL → channel_id)
-- [ ] Wire --output - (stdout binary output)
-- [ ] Fix --verbose to filter to yt_tts.* loggers only
-- [ ] Fix test_too_long_input (limit was removed, test still expects it)
-- [ ] Fix all other stale tests
-- [ ] Run full test suite, all green
-
-## Milestone 2: Performance Optimization
-- [ ] Add batch mode: yt-tts batch phrases.txt -o clips/
-- [ ] Skip caption APIs immediately when circuit breaker is tripped (no first-call penalty)
-- [ ] Improve Whisper estimation: smarter window sizing, better ♪ handling
-- [ ] Add progress bar (tqdm) during synthesis
-- [ ] Optimize Whisper: reuse model across batch, tiny model, GPU auto-detect
-- [ ] Profile and eliminate bottlenecks
-
-## Milestone 3: Full Dataset Bootstrap
-- [ ] Download all 597 YouTube-Commons parquet files
-- [ ] Verify resumability (interrupt + restart)
-- [ ] Index stats after full load
-- [ ] Test search quality at scale
-
-## Milestone 4: Open Source Prep
-- [ ] README.md with installation, usage, architecture, examples
-- [ ] LICENSE file (choose license)
-- [ ] Clean up spikes/ and ytp/ from repo (or .gitignore them)
-- [ ] Add ruff linting config + fix all lint issues
+## Next Up
+- [ ] Phoneme-level stitching: PSOLA/WORLD vocoder for sub-word splicing (V2)
+- [ ] Improve long-video position estimation (word-index ratio misses on 5+ min videos)
 - [ ] Add GitHub Actions CI (tests + lint)
 - [ ] Add CONTRIBUTING.md
-- [ ] Version bump to 0.2.0
-- [ ] Update CLAUDE.md to reflect final state
-- [ ] Final git commit + tag
+
+## Backlog
+- [ ] Batch inference: process multiple clips simultaneously
+- [ ] Snap-to-silence / snap-to-zero-crossing at word boundaries
+- [ ] Explore alternative datasets (People's Speech, VoxPopuli) for diversity
+- [ ] Podcast RSS crawling pipeline (RSS → download → ASR → index)
 
 ## Completed
 - [x] V1 implementation (Phases 0-7)
 - [x] Whisper alignment (bypass YouTube caption API)
+- [x] CTC forced alignment (ctc_forced_aligner + MMS_FA, ~30ms accuracy)
+- [x] Verify-then-retry pipeline (ASR verification, up to 5 candidates)
 - [x] Cookie support (--cookies, --cookies-from-browser)
 - [x] Persistent circuit breaker
-- [x] GPU auto-detection for Whisper
-- [x] YouTube-Commons bootstrap (1 parquet file, 27K transcripts)
-- [x] 68 unit tests passing
-- [x] End-to-end synthesis verified
+- [x] Cross-platform ASR backend (CUDA/MLX/CPU auto-detection)
+- [x] YouTube-Commons bootstrap (all 597 parquet files, 3,156,663 transcripts)
+- [x] Gentle loudness normalization (±6 LU window + alimiter)
+- [x] Batch mode (yt-tts batch phrases.txt -o clips/)
+- [x] Tightness control (tight/normal/loose/ms)
+- [x] 116 unit tests passing
+- [x] Ruff linting clean
+- [x] README.md with full documentation
 - [x] Claude Code skill created
+- [x] End-to-end synthesis verified (10/10 stress test phrases)
+- [x] MIT license
+- [x] Version bump to 0.2.0
