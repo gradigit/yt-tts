@@ -55,9 +55,9 @@ AGENTS_DIR="$HOME/.agents/skills/yt-tts"
 
 mkdir -p "$CLAUDE_DIR" "$CODEX_DIR" "$AGENTS_DIR"
 ln -sf "$INSTALL_DIR/skill/SKILL.md" "$CLAUDE_DIR/SKILL.md"
-ln -sf "$INSTALL_DIR/skill/SKILL.md" "$CODEX_DIR/SKILL.md"
+cp "$INSTALL_DIR/skill/SKILL.md" "$CODEX_DIR/SKILL.md"
 ln -sf "$INSTALL_DIR/skill/SKILL.md" "$AGENTS_DIR/SKILL.md"
-echo "Linked skill → ~/.claude/skills/ + ~/.codex/skills/ + ~/.agents/skills/"
+echo "Installed skill → ~/.claude/skills/ + ~/.codex/skills/ + ~/.agents/skills/"
 
 # Bootstrap starter index (~27K transcripts, ~100MB)
 echo ""
