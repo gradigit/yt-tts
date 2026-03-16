@@ -8,7 +8,6 @@ from pathlib import Path
 
 from yt_tts import __version__
 
-
 LEGAL_DISCLAIMER = (
     "DISCLAIMER: This tool downloads short audio clips from YouTube for "
     "transformative remix purposes. Users are responsible for ensuring their "
@@ -21,12 +20,19 @@ def _cleanup_temp_files(signum, frame):
     """Clean up temp files on Ctrl+C."""
     # Clean yt-tts temp files
     tmp = Path(tempfile.gettempdir())
-    for pattern in ("yt-tts-clip-*", "yt-tts-norm-*", "yt-tts-out-*",
-                    "yt-tts-stitch-*", "yt-tts-silence-*", "yt-tts-pair-*"):
+    for pattern in (
+        "yt-tts-clip-*",
+        "yt-tts-norm-*",
+        "yt-tts-out-*",
+        "yt-tts-stitch-*",
+        "yt-tts-silence-*",
+        "yt-tts-pair-*",
+    ):
         for p in tmp.glob(pattern):
             try:
                 if p.is_dir():
                     import shutil
+
                     shutil.rmtree(p, ignore_errors=True)
                 else:
                     p.unlink(missing_ok=True)
@@ -44,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     # Detect subcommand vs synthesis mode.
     # If first arg is a known subcommand, route to it.
     # Otherwise, treat everything as synthesis.
-    subcommands = {"index", "cache"}
+    subcommands = {"index", "cache", "batch"}
     command = args[0] if args else None
 
     if command == "--help" or command == "-h" or not args:
@@ -72,6 +78,7 @@ Usage:
   yt-tts index add-video URL              Add a video to index
   yt-tts index add-channel URL            Add channel to index
   yt-tts index stats                      Show index statistics
+  yt-tts batch phrases.txt -o clips/       Batch generate clips
   yt-tts cache stats                      Show cache statistics
   yt-tts cache clear                      Clear all caches
 
@@ -80,9 +87,11 @@ Synthesis options:
   --voice CHANNEL      Constrain clips to a channel
   --output PATH, -o    Output file (default: auto-named, '-' for stdout)
   --format {{mp3,wav}}   Output format (default: mp3)
+  --tightness MODE     Clip tightness: tight, normal (default), loose, or ms value
+  --asr-backend NAME   ASR backend: auto (default), faster-whisper, mlx
+  --asr-model SIZE     ASR model: tiny (default), base, small, medium, large-v3
   --no-cache           Disable caching
   --no-crossfade       Disable crossfade between clips
-  --align {{stable-ts,whisperx}}  Alignment method (V1: stub only)
   --cookies-from-browser BROWSER  Use cookies from browser (chrome, firefox, etc.)
   --cookies FILE       Use Netscape-format cookies file
   --json               Output structured JSON
@@ -101,6 +110,8 @@ def _dispatch_subcommand(args: list[str]) -> int:
         return _dispatch_index(rest)
     elif command == "cache":
         return _dispatch_cache(rest)
+    elif command == "batch":
+        return _dispatch_batch(rest)
     return 1
 
 
@@ -178,6 +189,83 @@ def _dispatch_cache(args: list[str]) -> int:
     return run_cache(a)
 
 
+def _dispatch_batch(args: list[str]) -> int:
+    if not args or args[0] in ("-h", "--help"):
+        print("""Usage: yt-tts batch INPUT_FILE -o OUTPUT_DIR [options]
+
+  Generate audio clips for each line in the input file.
+  Lines starting with # are skipped.
+
+Options:
+  -o DIR               Output directory (required)
+  --format {mp3,wav}   Output format (default: mp3)
+  --no-cache           Disable caching
+  --json               Output results as JSON
+  --cookies FILE       YouTube cookies file
+  --verbose            Debug logging""")
+        return 0
+
+    from yt_tts.cli.commands.batch import run_batch
+
+    class Args:
+        pass
+
+    a = Args()
+    a.input_file = None
+    a.output_dir = None
+    a.output_format = "mp3"
+    a.no_cache = False
+    a.json_output = False
+    a.verbose = False
+    a.cookies_from_browser = None
+    a.cookies_file = None
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-o", "--output") and i + 1 < len(args):
+            a.output_dir = args[i + 1]
+            i += 2
+        elif arg == "--format" and i + 1 < len(args):
+            a.output_format = args[i + 1]
+            i += 2
+        elif arg == "--cookies" and i + 1 < len(args):
+            a.cookies_file = args[i + 1]
+            i += 2
+        elif arg == "--cookies-from-browser" and i + 1 < len(args):
+            a.cookies_from_browser = args[i + 1]
+            i += 2
+        elif arg == "--no-cache":
+            a.no_cache = True
+            i += 1
+        elif arg == "--json":
+            a.json_output = True
+            i += 1
+        elif arg == "--verbose":
+            a.verbose = True
+            i += 1
+        elif not arg.startswith("-") and a.input_file is None:
+            a.input_file = arg
+            i += 1
+        else:
+            i += 1
+
+    if not a.input_file:
+        print("Error: input file required", file=sys.stderr)
+        return 1
+    if not a.output_dir:
+        print("Error: -o output directory required", file=sys.stderr)
+        return 1
+
+    if a.verbose:
+        logging.basicConfig(
+            level=logging.WARNING, format="%(name)s: %(message)s", stream=sys.stderr
+        )
+        logging.getLogger("yt_tts").setLevel(logging.DEBUG)
+
+    return run_batch(a)
+
+
 def _dispatch_synthesize(args: list[str]) -> int:
     # Parse synthesis args manually for full control
     text_parts = []
@@ -192,6 +280,9 @@ def _dispatch_synthesize(args: list[str]) -> int:
     verbose = False
     cookies_from_browser = None
     cookies_file = None
+    tightness = "normal"
+    asr_backend = "auto"
+    asr_model = "tiny"
 
     i = 0
     while i < len(args):
@@ -210,6 +301,16 @@ def _dispatch_synthesize(args: list[str]) -> int:
             i += 2
         elif arg == "--align" and i + 1 < len(args):
             align = args[i + 1]
+            i += 2
+        elif arg == "--tightness" and i + 1 < len(args):
+            v = args[i + 1]
+            tightness = int(v) if v.isdigit() else v
+            i += 2
+        elif arg == "--asr-backend" and i + 1 < len(args):
+            asr_backend = args[i + 1]
+            i += 2
+        elif arg == "--asr-model" and i + 1 < len(args):
+            asr_model = args[i + 1]
             i += 2
         elif arg == "--cookies-from-browser" and i + 1 < len(args):
             cookies_from_browser = args[i + 1]
@@ -239,11 +340,14 @@ def _dispatch_synthesize(args: list[str]) -> int:
     text = " ".join(text_parts)
     if not text:
         print("Error: no text provided.", file=sys.stderr)
-        print("Usage: yt-tts [options] \"text to synthesize\"", file=sys.stderr)
+        print('Usage: yt-tts [options] "text to synthesize"', file=sys.stderr)
         return 1
 
     if verbose:
-        logging.basicConfig(level=logging.DEBUG, format="%(name)s: %(message)s", stream=sys.stderr)
+        logging.basicConfig(
+            level=logging.WARNING, format="%(name)s: %(message)s", stream=sys.stderr
+        )
+        logging.getLogger("yt_tts").setLevel(logging.DEBUG)
 
     class Args:
         pass
@@ -261,8 +365,12 @@ def _dispatch_synthesize(args: list[str]) -> int:
     a.verbose = verbose
     a.cookies_from_browser = cookies_from_browser
     a.cookies_file = cookies_file
+    a.tightness = tightness
+    a.asr_backend = asr_backend
+    a.asr_model = asr_model
 
     from yt_tts.cli.commands.synthesize import run_synthesize
+
     return run_synthesize(a)
 
 

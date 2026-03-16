@@ -24,9 +24,12 @@ def _get_duration_ms(path: Path) -> float:
     result = subprocess.run(
         [
             "ffprobe",
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
             str(path),
         ],
         capture_output=True,
@@ -39,83 +42,94 @@ def _get_duration_ms(path: Path) -> float:
 
 
 def normalize_clip(clip_path: Path, config: Config) -> Path:
-    """Apply EBU R128 loudness normalization (two-pass loudnorm).
+    """Gentle volume normalization — prevents extreme jumps while keeping variation.
 
-    Pass 1 measures the input loudness parameters.  Pass 2 applies the
-    measured values for linear normalization, resampling to
-    ``config.sample_rate``.
+    Instead of forcing all clips to exactly -16 LUFS (which kills natural variation),
+    this measures the clip's loudness and only adjusts if it's too far from the target.
+    Clips within a ±6 LU window of the target are left alone. Clips outside that
+    window are nudged toward the edge of the window, not to the exact target.
+
+    This preserves the "voice of the internet" character — different speakers at
+    different volumes — while preventing near-silence or ear-blasting clips.
 
     Returns:
         Path to the normalized WAV file (in a temp directory).
-
-    Raises:
-        StitchError: when either ffmpeg pass fails.
     """
-    target_i = config.loudnorm_target_i
-    target_tp = config.loudnorm_target_tp
-    target_lra = config.loudnorm_target_lra
+    target_i = config.loudnorm_target_i  # default -16 LUFS
+    window_lu = 6.0  # clips within ±6 LU of target are untouched
 
-    # --- Pass 1: measure ---
+    # --- Measure loudness ---
     af_measure = (
-        f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}:print_format=json"
+        f"loudnorm=I={target_i}:TP={config.loudnorm_target_tp}"
+        f":LRA={config.loudnorm_target_lra}:print_format=json"
     )
     cmd_measure = [
-        "ffmpeg", "-y",
-        "-i", str(clip_path),
-        "-af", af_measure,
-        "-f", "null",
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(clip_path),
+        "-af",
+        af_measure,
+        "-f",
+        "null",
         "/dev/null",
     ]
     result = _run_ffmpeg(cmd_measure)
     if result.returncode != 0:
-        raise StitchError(
-            f"loudnorm measurement failed for {clip_path}: {result.stderr.strip()}"
-        )
+        raise StitchError(f"loudnorm measurement failed for {clip_path}: {result.stderr.strip()}")
 
-    # Parse JSON from stderr — ffmpeg prints it after the loudnorm stats
     stderr = result.stderr
     json_match = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", stderr, re.DOTALL)
     if not json_match:
-        raise StitchError(
-            f"Could not parse loudnorm JSON from ffmpeg output for {clip_path}"
-        )
+        raise StitchError(f"Could not parse loudnorm JSON from ffmpeg output for {clip_path}")
     try:
         measured = json.loads(json_match.group())
     except json.JSONDecodeError as exc:
-        raise StitchError(
-            f"Invalid loudnorm JSON for {clip_path}: {exc}"
-        ) from exc
+        raise StitchError(f"Invalid loudnorm JSON for {clip_path}: {exc}") from exc
 
-    measured_i = measured["input_i"]
-    measured_tp = measured["input_tp"]
-    measured_lra = measured["input_lra"]
-    measured_thresh = measured["input_thresh"]
+    input_i = float(measured["input_i"])
 
-    # --- Pass 2: apply ---
-    af_apply = (
-        f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
-        f":measured_I={measured_i}:measured_TP={measured_tp}"
-        f":measured_LRA={measured_lra}:measured_thresh={measured_thresh}"
-        f":linear=true"
+    # --- Decide how much to adjust ---
+    # If clip is within the window, just resample (no volume change)
+    # If too quiet or too loud, nudge to the edge of the window
+    diff = input_i - target_i  # negative = quieter than target
+    if abs(diff) <= window_lu:
+        # Within acceptable range — just resample, no loudness change
+        gain_db = 0.0
+    elif diff < -window_lu:
+        # Too quiet — bring up to lower edge of window
+        gain_db = -(diff + window_lu)  # positive gain (louder)
+    else:
+        # Too loud — bring down to upper edge of window
+        gain_db = -(diff - window_lu)  # negative gain (quieter)
+
+    logger.debug(
+        "Normalize %s: input=%.1f LUFS, target=%.1f±%.0f, gain=%.1fdB",
+        clip_path.name,
+        input_i,
+        target_i,
+        window_lu,
+        gain_db,
     )
-    tmp = tempfile.NamedTemporaryFile(
-        suffix=".wav", prefix="yt-tts-norm-", delete=False
-    )
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", prefix="yt-tts-norm-", delete=False)
     tmp.close()
     output_path = Path(tmp.name)
 
+    # Apply gain + resample + prevent clipping
+    af = f"volume={gain_db}dB,alimiter=limit=0.95,aresample={config.sample_rate}"
     cmd_apply = [
-        "ffmpeg", "-y",
-        "-i", str(clip_path),
-        "-af", af_apply,
-        "-ar", str(config.sample_rate),
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(clip_path),
+        "-af",
+        af,
         str(output_path),
     ]
     result = _run_ffmpeg(cmd_apply)
     if result.returncode != 0:
-        raise StitchError(
-            f"loudnorm apply failed for {clip_path}: {result.stderr.strip()}"
-        )
+        raise StitchError(f"Normalize failed for {clip_path}: {result.stderr.strip()}")
 
     if not output_path.is_file() or output_path.stat().st_size == 0:
         raise StitchError(f"Normalized file is empty or missing: {output_path}")
@@ -132,26 +146,27 @@ def generate_silence(duration_ms: int, config: Config) -> Path:
     Raises:
         StitchError: when ffmpeg fails.
     """
-    tmp = tempfile.NamedTemporaryFile(
-        suffix=".wav", prefix="yt-tts-silence-", delete=False
-    )
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", prefix="yt-tts-silence-", delete=False)
     tmp.close()
     output_path = Path(tmp.name)
     duration_s = duration_ms / 1000.0
 
     cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi",
-        "-i", f"anullsrc=r={config.sample_rate}:cl=mono",
-        "-t", f"{duration_s:.3f}",
-        "-ar", str(config.sample_rate),
+        "ffmpeg",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        f"anullsrc=r={config.sample_rate}:cl=mono",
+        "-t",
+        f"{duration_s:.3f}",
+        "-ar",
+        str(config.sample_rate),
         str(output_path),
     ]
     result = _run_ffmpeg(cmd)
     if result.returncode != 0:
-        raise StitchError(
-            f"Silence generation failed: {result.stderr.strip()}"
-        )
+        raise StitchError(f"Silence generation failed: {result.stderr.strip()}")
 
     if not output_path.is_file() or output_path.stat().st_size == 0:
         raise StitchError(f"Silence file is empty or missing: {output_path}")
@@ -165,45 +180,49 @@ def _stitch_pair(a: Path, b: Path, crossfade_ms: int, config: Config) -> Path:
     Returns:
         Path to the stitched output WAV file.
     """
-    tmp = tempfile.NamedTemporaryFile(
-        suffix=".wav", prefix="yt-tts-pair-", delete=False
-    )
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", prefix="yt-tts-pair-", delete=False)
     tmp.close()
     output_path = Path(tmp.name)
 
     if crossfade_ms > 0:
         cf_s = crossfade_ms / 1000.0
-        filter_complex = (
-            f"[0:a][1:a]acrossfade=d={cf_s:.3f}:c1=tri:c2=tri[out]"
-        )
+        filter_complex = f"[0:a][1:a]acrossfade=d={cf_s:.3f}:c1=tri:c2=tri[out]"
         cmd = [
-            "ffmpeg", "-y",
-            "-i", str(a),
-            "-i", str(b),
-            "-filter_complex", filter_complex,
-            "-map", "[out]",
-            "-ar", str(config.sample_rate),
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(a),
+            "-i",
+            str(b),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[out]",
+            "-ar",
+            str(config.sample_rate),
             str(output_path),
         ]
     else:
-        filter_complex = (
-            "[0:a][1:a]concat=n=2:v=0:a=1[out]"
-        )
+        filter_complex = "[0:a][1:a]concat=n=2:v=0:a=1[out]"
         cmd = [
-            "ffmpeg", "-y",
-            "-i", str(a),
-            "-i", str(b),
-            "-filter_complex", filter_complex,
-            "-map", "[out]",
-            "-ar", str(config.sample_rate),
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(a),
+            "-i",
+            str(b),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[out]",
+            "-ar",
+            str(config.sample_rate),
             str(output_path),
         ]
 
     result = _run_ffmpeg(cmd)
     if result.returncode != 0:
-        raise StitchError(
-            f"Pairwise stitch failed: {result.stderr.strip()}"
-        )
+        raise StitchError(f"Pairwise stitch failed: {result.stderr.strip()}")
 
     return output_path
 
@@ -230,9 +249,7 @@ def stitch_clips(clips: list[Path], gaps: list[int], config: Config) -> Path:
     if not clips:
         raise StitchError("No clips to stitch")
     if len(gaps) != len(clips) - 1:
-        raise StitchError(
-            f"Expected {len(clips) - 1} gaps, got {len(gaps)}"
-        )
+        raise StitchError(f"Expected {len(clips) - 1} gaps, got {len(gaps)}")
 
     if len(clips) == 1:
         # Single clip — just encode to the desired output format
@@ -250,32 +267,36 @@ def stitch_clips(clips: list[Path], gaps: list[int], config: Config) -> Path:
 def _encode_output(clip: Path, config: Config) -> Path:
     """Encode a single clip to the desired output format."""
     ext = config.output_format
-    tmp = tempfile.NamedTemporaryFile(
-        suffix=f".{ext}", prefix="yt-tts-out-", delete=False
-    )
+    tmp = tempfile.NamedTemporaryFile(suffix=f".{ext}", prefix="yt-tts-out-", delete=False)
     tmp.close()
     output_path = Path(tmp.name)
 
     if ext == "mp3":
         cmd = [
-            "ffmpeg", "-y",
-            "-i", str(clip),
-            "-c:a", "libmp3lame", "-q:a", "2",
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(clip),
+            "-c:a",
+            "libmp3lame",
+            "-q:a",
+            "2",
             str(output_path),
         ]
     else:
         cmd = [
-            "ffmpeg", "-y",
-            "-i", str(clip),
-            "-ar", str(config.sample_rate),
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(clip),
+            "-ar",
+            str(config.sample_rate),
             str(output_path),
         ]
 
     result = _run_ffmpeg(cmd)
     if result.returncode != 0:
-        raise StitchError(
-            f"Output encoding failed: {result.stderr.strip()}"
-        )
+        raise StitchError(f"Output encoding failed: {result.stderr.strip()}")
 
     return output_path
 
@@ -292,9 +313,7 @@ def _stitch_filter_complex(
     optionally applying crossfade between adjacent clip+silence pairs.
     """
     ext = config.output_format
-    tmp = tempfile.NamedTemporaryFile(
-        suffix=f".{ext}", prefix="yt-tts-stitch-", delete=False
-    )
+    tmp = tempfile.NamedTemporaryFile(suffix=f".{ext}", prefix="yt-tts-stitch-", delete=False)
     tmp.close()
     output_path = Path(tmp.name)
 
@@ -323,15 +342,10 @@ def _stitch_filter_complex(
     if crossfade_ms > 0 and len(clips) == 2 and all(g == 0 for g in gaps):
         # Special case: two clips, no gap, with crossfade
         cf_s = crossfade_ms / 1000.0
-        filter_complex = (
-            f"[0:a][1:a]acrossfade=d={cf_s:.3f}:c1=tri:c2=tri[out]"
-        )
+        filter_complex = f"[0:a][1:a]acrossfade=d={cf_s:.3f}:c1=tri:c2=tri[out]"
     else:
         # General case: concat all inputs
-        filter_complex = (
-            "".join(labels)
-            + f"concat=n={n_streams}:v=0:a=1[out]"
-        )
+        filter_complex = "".join(labels) + f"concat=n={n_streams}:v=0:a=1[out]"
 
     if ext == "mp3":
         output_args = ["-c:a", "libmp3lame", "-q:a", "2"]
@@ -349,9 +363,7 @@ def _stitch_filter_complex(
 
     result = _run_ffmpeg(cmd)
     if result.returncode != 0:
-        raise StitchError(
-            f"filter_complex stitch failed: {result.stderr.strip()}"
-        )
+        raise StitchError(f"filter_complex stitch failed: {result.stderr.strip()}")
 
     if not output_path.is_file() or output_path.stat().st_size == 0:
         raise StitchError(f"Stitched output is empty or missing: {output_path}")

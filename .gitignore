@@ -44,3 +44,28 @@ spikes/*.json3
 spikes/*.m4a
 spikes/*.mp3
 spikes/*.wav
+
+# YTP project outputs
+ytp/clips/
+ytp/visual_src/
+ytp/processed/
+ytp/work*/
+ytp/*.mp4
+ytp/_temp*
+
+# Generated audio
+yt-tts-*.mp3
+yt-tts-*.wav
+demo*.mp3
+
+# Forge orchestrator artifacts
+FORGE-STATUS.md
+FORGE-HANDOFF.md
+FORGE-MEMORY.md
+HUMAN-INPUT.md
+MISSION-CONTROL.md
+SUGGESTIONS.md
+DEFERRED-CHANGES.md
+architect/agent-contexts/
+architect/review-findings/
+.claude/forge-scopes.json

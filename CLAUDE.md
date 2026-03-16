@@ -4,14 +4,16 @@ YouTube Text-to-Speech — turns any text into audio by finding and stitching Yo
 
 ## Build Commands
 ```
-pip install -e .              # install in dev mode
-pip install -e ".[dev]"       # install with test deps
-pip install -e ".[bootstrap]" # install with bootstrap deps (huggingface_hub, pyarrow)
+pip install -e .              # install in dev mode (includes faster-whisper, curl_cffi)
+pip install -e ".[dev]"       # + test deps (pytest, ruff)
+pip install -e ".[bootstrap]" # + bootstrap deps (huggingface_hub, pyarrow)
 yt-tts "hello world"          # basic usage (requires populated index)
 yt-tts --video URL "hello"    # use specific video (no index needed)
 yt-tts index init             # download YouTube-Commons + build index
 yt-tts index search "phrase"  # search the index
-pytest                        # run tests (66 unit tests)
+yt-tts batch phrases.txt -o clips/  # batch mode
+pytest                        # run tests (116 unit tests)
+ruff check src/yt_tts/        # lint
 ```
 
 ## Project Structure
@@ -27,29 +29,30 @@ yt-tts/
 │   │   ├── bootstrap.py      # YouTube-Commons download + ingest
 │   │   ├── crawl.py          # add-channel, add-video
 │   │   ├── search.py         # High-level search (index + live)
-│   │   ├── captions.py       # json3 + transcript-api fetching
+│   │   ├── captions.py       # json3 + transcript-api + page-scrape fetching
 │   │   ├── timestamps.py     # json3 parsing, phrase location
 │   │   ├── extract.py        # Clip download (stream URL + ffmpeg)
-│   │   ├── align.py          # V1 stubs for stable-ts/whisperx
+│   │   ├── align.py          # Whisper alignment (faster-whisper, GPU auto-detect)
 │   │   ├── stitch.py         # loudnorm + concat + crossfade
 │   │   ├── chunk.py          # Bumblebee greedy longest-match
 │   │   ├── pipeline.py       # Orchestrator: text → audio
 │   │   ├── cache.py          # CaptionCache + ClipCache
+│   │   ├── deps.py           # External dependency checking
 │   │   └── ratelimit.py      # RateLimiter, CircuitBreaker, InvocationBudget
 │   └── cli/
-│       ├── app.py            # argparse entry point
+│       ├── app.py            # CLI entry point (manual arg parsing)
 │       ├── commands/
-│       │   ├── synthesize.py
-│       │   ├── index.py
-│       │   └── cache.py
+│       │   ├── synthesize.py # Single synthesis
+│       │   ├── batch.py      # Batch synthesis from file
+│       │   ├── index.py      # Index management
+│       │   └── cache.py      # Cache management
 │       └── output.py         # JSON formatter
 ├── tests/
-│   ├── unit/                 # 66 tests, no network/external tools
+│   ├── unit/                 # 116 tests, no network/external tools
 │   ├── integration/          # Requires network + ffmpeg
 │   └── fixtures/
-├── spikes/                   # Validation spikes (json3, partial download, FTS5)
+├── skill/SKILL.md            # Claude Code skill (symlinked to ~/.claude/skills/yt-tts)
 ├── data/starter_channels.json
-├── architect/                # Planning artifacts (reference only)
 └── pyproject.toml
 ```
 
@@ -58,19 +61,14 @@ yt-tts/
 - Python >=3.11, sync + ThreadPoolExecutor for concurrency
 - SQLite FTS5 with `tokenchars "'"` for contraction support
 - ffmpeg for audio processing, yt-dlp for YouTube interaction
-- Functional core, classes for state (TranscriptIndex, caches, rate limiters)
-- Dataclasses as result types, exceptions only for unexpected failures
-- English only for V1
+- faster-whisper (tiny model, GPU auto-detect) for timestamp alignment
+- Persistent circuit breaker: skips caption APIs after first 429, goes straight to Whisper
+- No arbitrary limits on input length or clip count
+- Multilingual support (YouTube-Commons has all languages, Whisper auto-detects)
+- Lint: ruff (line-length=100, py311)
 
-## Current Phase
-Phase: V1 implementation complete (Phases 0-7)
-
-## Phase Progress
-- [x] Phase 0: Skeleton + spikes (pyproject.toml, all modules, FTS5 spike validated)
-- [x] Phase 1: Caption fetching + timestamp extraction
-- [x] Phase 2: Clip extraction
-- [x] Phase 3: Stitching pipeline
-- [x] Phase 4: SQLite FTS5 index + search
-- [x] Phase 5: Bumblebee chunking + pipeline orchestrator
-- [x] Phase 6: YouTube-Commons bootstrap + incremental crawling
-- [x] Phase 7: Polish (alignment stubs, cache subcommands, CLI flags, legal disclaimer)
+## Current State
+- 116 unit tests passing, lint clean
+- YouTube-Commons bootstrap downloading (597 parquet files → ~22.7M transcripts)
+- Full CRT pipeline tested in YTP video project (ytp/)
+- Claude Code skill installed at ~/.claude/skills/yt-tts

@@ -1,7 +1,6 @@
 """Dependency checking for external tools."""
 
 import shutil
-import subprocess
 import sys
 
 from yt_tts.exceptions import DependencyError
@@ -23,8 +22,7 @@ def check_ffprobe() -> None:
     """Verify ffprobe is installed and accessible."""
     if not shutil.which("ffprobe"):
         raise DependencyError(
-            "ffprobe is not installed or not on PATH.\n"
-            "It is usually included with ffmpeg."
+            "ffprobe is not installed or not on PATH.\nIt is usually included with ffmpeg."
         )
 
 
@@ -32,8 +30,7 @@ def check_ytdlp() -> None:
     """Verify yt-dlp is installed and accessible."""
     if not shutil.which("yt-dlp"):
         raise DependencyError(
-            "yt-dlp is not installed or not on PATH.\n"
-            "Install it with: pip install yt-dlp"
+            "yt-dlp is not installed or not on PATH.\nInstall it with: pip install yt-dlp"
         )
 
 

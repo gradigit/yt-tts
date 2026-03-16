@@ -48,9 +48,7 @@ def _get_progress(conn: sqlite3.Connection) -> int:
 
 def _set_progress(conn: sqlite3.Connection, file_index: int) -> None:
     """Update the last completed Parquet file index."""
-    conn.execute(
-        "UPDATE bootstrap_progress SET last_completed_file = ?", (file_index,)
-    )
+    conn.execute("UPDATE bootstrap_progress SET last_completed_file = ?", (file_index,))
     conn.commit()
 
 
@@ -62,12 +60,11 @@ def bootstrap_index(config: Config) -> None:
     Resumable via progress tracking in SQLite.
     """
     try:
-        from huggingface_hub import hf_hub_download
         import pyarrow.parquet as pq
+        from huggingface_hub import hf_hub_download
     except ImportError:
         print(
-            "Bootstrap requires extra dependencies. Install with:\n"
-            "  pip install yt-tts[bootstrap]",
+            "Bootstrap requires extra dependencies. Install with:\n  pip install yt-tts[bootstrap]",
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -118,16 +115,21 @@ def bootstrap_index(config: Config) -> None:
             batch_size = 10_000
 
             for rg_idx in range(pf.metadata.num_row_groups):
-                table = pf.read_row_group(rg_idx, columns=[
-                    "video_id", "channel_id", "channel", "title",
-                    "text", "original_language", "word_count",
-                ])
+                table = pf.read_row_group(
+                    rg_idx,
+                    columns=[
+                        "video_id",
+                        "channel_id",
+                        "channel",
+                        "title",
+                        "text",
+                        "original_language",
+                        "word_count",
+                    ],
+                )
 
                 for row_idx in range(table.num_rows):
-                    # Filter: English only
                     lang = table.column("original_language")[row_idx].as_py()
-                    if lang != "en":
-                        continue
 
                     record = {
                         "video_id": table.column("video_id")[row_idx].as_py(),
@@ -135,7 +137,7 @@ def bootstrap_index(config: Config) -> None:
                         "channel_name": table.column("channel")[row_idx].as_py(),
                         "title": table.column("title")[row_idx].as_py(),
                         "text": table.column("text")[row_idx].as_py(),
-                        "language": "en",
+                        "language": lang or "unknown",
                     }
 
                     batch.append(record)

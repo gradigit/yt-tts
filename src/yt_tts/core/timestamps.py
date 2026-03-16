@@ -42,12 +42,14 @@ def parse_json3(data: dict) -> list[WordTimestamp]:
                 end_ms = seg_entries[i + 1][1]
             else:
                 end_ms = t_start_ms + d_duration_ms
-            words.append(WordTimestamp(
-                word=text,
-                start_ms=start_ms,
-                end_ms=end_ms,
-                confidence=confidence,
-            ))
+            words.append(
+                WordTimestamp(
+                    word=text,
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    confidence=confidence,
+                )
+            )
 
     return words
 

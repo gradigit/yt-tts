@@ -8,7 +8,6 @@ from pathlib import Path
 from yt_tts.exceptions import IndexError_
 from yt_tts.types import SearchResult
 
-
 _SCHEMA_TRANSCRIPTS = """\
 CREATE TABLE IF NOT EXISTS transcripts (
     id INTEGER PRIMARY KEY,

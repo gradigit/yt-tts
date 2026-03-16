@@ -10,12 +10,18 @@ class Config:
     """All configuration for a yt-tts invocation."""
 
     # Paths
-    db_path: Path = field(default_factory=lambda: Path(
-        os.environ.get("YT_TTS_DB", Path.home() / ".local" / "share" / "yt-tts" / "transcripts.db")
-    ))
-    cache_dir: Path = field(default_factory=lambda: Path(
-        os.environ.get("YT_TTS_CACHE", Path.home() / ".cache" / "yt-tts")
-    ))
+    db_path: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get(
+                "YT_TTS_DB", Path.home() / ".local" / "share" / "yt-tts" / "transcripts.db"
+            )
+        )
+    )
+    cache_dir: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("YT_TTS_CACHE", Path.home() / ".cache" / "yt-tts")
+        )
+    )
     output_path: Path | None = None  # None = auto-generate
 
     # Output
@@ -27,9 +33,9 @@ class Config:
     min_confidence: int = 128  # 0-255 threshold for word timestamps
     channel_filter: str | None = None  # --voice constraint
 
-    # Chunking
-    max_input_words: int = 100
-    max_clips: int = 50
+    # Chunking (no arbitrary limits — longer input just takes longer)
+    max_input_words: int = 0  # 0 = no limit
+    max_clips: int = 0  # 0 = no limit
     chunk_search_timeout_s: float = 30.0
     chunk_resolve_timeout_s: float = 30.0
 
@@ -37,6 +43,20 @@ class Config:
     preferred_format: str = "140"  # m4a
     clip_padding_ms: int = 100
     audio_bitrate: str = "128k"
+
+    # Tightness control — how clips are trimmed around word boundaries
+    # "tight" = minimal padding, cuts close to word edges
+    # "normal" = small padding for natural sound (default)
+    # "loose" = generous padding, more context around words
+    # Can also be an int (ms of padding around word boundaries)
+    tightness: str | int = "normal"
+
+    # ASR backend selection
+    # "auto" = CUDA→faster-whisper, MLX→mlx-whisper, CPU→faster-whisper
+    # "faster-whisper" = force faster-whisper
+    # "mlx" = force mlx-whisper (Apple Silicon only)
+    asr_backend: str = "auto"
+    asr_model: str = "tiny"  # tiny, base, small, medium, large-v3
 
     # Stitching
     crossfade_ms: int = 50

@@ -28,22 +28,28 @@ def run_index(args) -> int:
     elif cmd == "add-starter":
         return _index_add_starter(config)
     else:
-        print("Usage: yt-tts index {init|stats|search|add-channel|add-video|add-starter}", file=sys.stderr)
+        print(
+            "Usage: yt-tts index {init|stats|search|add-channel|add-video|add-starter}",
+            file=sys.stderr,
+        )
         return 1
 
 
 def _index_init(config: Config) -> int:
     from yt_tts.core.bootstrap import bootstrap_index
+
     bootstrap_index(config)
     return 0
 
 
 def _index_stats(config: Config) -> int:
     from yt_tts.core.index import TranscriptIndex
+
     index = TranscriptIndex(config.db_path)
     stats = index.stats()
     if config.json_output:
         import json
+
         print(json.dumps(stats))
     else:
         print(f"Total transcripts: {stats['total_transcripts']:,}")
@@ -55,6 +61,7 @@ def _index_stats(config: Config) -> int:
 
 def _index_search(query: str, limit: int, config: Config) -> int:
     from yt_tts.core.index import TranscriptIndex
+
     index = TranscriptIndex(config.db_path)
     results = index.search(query, limit=limit)
     if not results:
@@ -62,10 +69,15 @@ def _index_search(query: str, limit: int, config: Config) -> int:
         return 1
     if config.json_output:
         import json
-        print(json.dumps([
-            {"video_id": r.video_id, "title": r.title, "context": r.context_text}
-            for r in results
-        ]))
+
+        print(
+            json.dumps(
+                [
+                    {"video_id": r.video_id, "title": r.title, "context": r.context_text}
+                    for r in results
+                ]
+            )
+        )
     else:
         for i, r in enumerate(results, 1):
             print(f"{i}. [{r.video_id}] {r.title}")
@@ -77,6 +89,7 @@ def _index_search(query: str, limit: int, config: Config) -> int:
 def _index_add_channel(url: str, config: Config) -> int:
     from yt_tts.core.crawl import crawl_channel
     from yt_tts.core.index import TranscriptIndex
+
     index = TranscriptIndex(config.db_path)
     count = crawl_channel(url, index, config)
     print(f"Added {count} transcripts from channel.")
@@ -87,6 +100,7 @@ def _index_add_video(url: str, config: Config) -> int:
     from yt_tts.core.crawl import index_video
     from yt_tts.core.index import TranscriptIndex
     from yt_tts.exceptions import CaptionFetchError
+
     index = TranscriptIndex(config.db_path)
     try:
         index_video(url, index, config)
@@ -100,6 +114,7 @@ def _index_add_video(url: str, config: Config) -> int:
 def _index_add_starter(config: Config) -> int:
     from yt_tts.core.crawl import add_starter_channels
     from yt_tts.core.index import TranscriptIndex
+
     index = TranscriptIndex(config.db_path)
     count = add_starter_channels(index, config)
     print(f"Added {count} transcripts from starter channels.")

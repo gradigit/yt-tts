@@ -14,8 +14,7 @@ def search_transcripts(
 ) -> SearchResult | None:
     """Search the index for a phrase. Returns the best match or None.
 
-    Applies channel_filter from config if set. Tries multiple results
-    if the first one is low quality (very negative rank score).
+    Applies channel_filter from config if set.
     """
     results = index.search(
         phrase=phrase,
@@ -24,8 +23,25 @@ def search_transcripts(
     )
     if not results:
         return None
-    # Return the best-ranked result (FTS5 rank: lower/more-negative = better match).
     return results[0]
+
+
+def search_transcripts_multi(
+    phrase: str,
+    index: TranscriptIndex,
+    config: Config,
+    limit: int = 5,
+) -> list[SearchResult]:
+    """Search the index for a phrase. Returns multiple ranked results.
+
+    Used by the resolver to iterate through candidates when clips fail
+    verification (wrong audio, age-restricted video, etc.).
+    """
+    return index.search(
+        phrase=phrase,
+        channel_id=config.channel_filter,
+        limit=limit,
+    )
 
 
 def search_live_video(

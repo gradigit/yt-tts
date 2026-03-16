@@ -109,10 +109,17 @@ class TestChunkPhrase:
         plan = chunk_phrase("", lambda p: None, config)
         assert plan.chunks == []
 
-    def test_too_long_input(self):
+    def test_too_long_input_with_limit(self):
         config = Config(max_input_words=5)
         with pytest.raises(ValueError, match="Input too long"):
             chunk_phrase("one two three four five six", lambda p: None, config)
+
+    def test_no_limit_by_default(self):
+        """Default config has no word limit."""
+        config = Config()
+        # Should not raise even with many words
+        plan = chunk_phrase("a b c d e f g h i j k l m n o p q r s t", lambda p: None, config)
+        assert len(plan.chunks) == 20  # all single words, no matches
 
     def test_search_cache(self):
         """Same phrase should not be searched twice."""
@@ -129,7 +136,7 @@ class TestChunkPhrase:
         chunk_phrase("a b", search_fn, config)
         assert call_count == 3  # "a b", "a", "b"
 
-    def test_max_clips_limit(self):
+    def test_max_clips_limit_when_set(self):
         def search_fn(phrase):
             if len(phrase.split()) == 1:
                 return make_search_result(phrase=phrase)
@@ -140,6 +147,16 @@ class TestChunkPhrase:
         plan = chunk_phrase("a b c d e", search_fn, config)
         assert len(plan.chunks) == 3
         assert len(plan.missing_words) > 0
+
+    def test_no_clips_limit_by_default(self):
+        def search_fn(phrase):
+            if len(phrase.split()) == 1:
+                return make_search_result(phrase=phrase)
+            return None
+
+        config = Config()  # max_clips=0 = no limit
+        plan = chunk_phrase("a b c d e f g h i j", search_fn, config)
+        assert len(plan.chunks) == 10
 
     def test_no_matches_at_all(self):
         config = Config()

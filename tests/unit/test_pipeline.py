@@ -28,7 +28,7 @@ class TestSynthesize:
     def test_no_matches(self, mock_resolve_fn, mock_search_fn):
         from yt_tts.core.pipeline import synthesize
 
-        mock_search_fn.return_value = lambda phrase: None
+        mock_search_fn.return_value = (lambda phrase: None, lambda phrase: [])
         mock_resolve_fn.return_value = lambda phrase, result: None
 
         config = Config()

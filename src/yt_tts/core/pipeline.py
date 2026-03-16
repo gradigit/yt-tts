@@ -3,19 +3,65 @@
 import hashlib
 import logging
 import sys
-import tempfile
 from pathlib import Path
 
 from yt_tts.config import Config
 from yt_tts.exceptions import (
     BudgetExhaustedError,
-    CaptionFetchError,
-    ClipExtractionError,
-    YtTtsError,
 )
 from yt_tts.types import ClipInfo, SearchResult, SynthesisResult, TimeRange
 
 logger = logging.getLogger(__name__)
+
+
+def _verify_clip(clip_path: Path, expected_phrase: str, threshold: float = 0.6) -> bool:
+    """Verify a clip actually contains the expected phrase by running ASR on it.
+
+    Uses sequential word matching (not just bag-of-words) to catch clips
+    that contain the right words in the wrong order or context.
+    Returns True if at least `threshold` fraction of expected words match
+    in sequence. Fast check (~500ms).
+    """
+    import re
+
+    try:
+        from yt_tts.core.asr import transcribe
+
+        result = transcribe(str(clip_path), model_size="tiny", backend="auto")
+        heard = re.sub(r"[^\w\s']", "", result.text.lower()).split()
+        expected_words = re.sub(r"[^\w\s']", "", expected_phrase.lower()).split()
+
+        if not expected_words:
+            return True
+
+        # Longest common subsequence — counts words that match in order
+        # but allows gaps (skipped words) in both sequences
+        matches = 0
+        h_idx = 0
+        for exp_word in expected_words:
+            found = False
+            search_start = h_idx
+            while search_start < len(heard):
+                if heard[search_start] == exp_word:
+                    matches += 1
+                    h_idx = search_start + 1
+                    found = True
+                    break
+                search_start += 1
+            # If not found, don't advance h_idx — keep looking from same position
+            # for the next expected word
+
+        accuracy = matches / len(expected_words)
+        logger.debug(
+            "Verify clip: expected='%s', heard='%s', accuracy=%.0f%%",
+            expected_phrase,
+            result.text.strip(),
+            accuracy * 100,
+        )
+        return accuracy >= threshold
+    except Exception as e:
+        logger.debug("Verify clip failed: %s", e)
+        return True  # don't block on verification errors
 
 
 def _make_output_path(text: str, config: Config) -> Path:
@@ -29,27 +75,40 @@ def _make_output_path(text: str, config: Config) -> Path:
 
 
 def _build_search_fn(config: Config):
-    """Build the search function based on config (index or live video)."""
+    """Build the search function based on config (index or live video).
+
+    Returns a function that takes a phrase and returns the best SearchResult,
+    plus a multi_search function that returns ranked candidates for retry.
+    """
     if config.video_url:
         from yt_tts.core.search import search_live_video
 
         def search_fn(phrase: str) -> SearchResult | None:
             return search_live_video(phrase, config.video_url)
-        return search_fn
+
+        def multi_search_fn(phrase: str) -> list[SearchResult]:
+            r = search_live_video(phrase, config.video_url)
+            return [r] if r else []
+
+        return search_fn, multi_search_fn
     else:
         from yt_tts.core.index import TranscriptIndex
-        from yt_tts.core.search import search_transcripts
+        from yt_tts.core.search import search_transcripts, search_transcripts_multi
 
         index = TranscriptIndex(config.db_path)
 
         def search_fn(phrase: str) -> SearchResult | None:
             return search_transcripts(phrase, index, config)
-        return search_fn
+
+        def multi_search_fn(phrase: str) -> list[SearchResult]:
+            return search_transcripts_multi(phrase, index, config, limit=5)
+
+        return search_fn, multi_search_fn
 
 
 def _build_resolve_fn(config: Config):
     """Build the resolve function that turns a search result into a clip."""
-    from yt_tts.core.cache import CaptionCache, ClipCache
+    from yt_tts.core.cache import ClipCache
     from yt_tts.core.captions import fetch_json3, fetch_transcript
     from yt_tts.core.extract import extract_clip
     from yt_tts.core.ratelimit import InvocationBudget, RateLimiter
@@ -59,7 +118,6 @@ def _build_resolve_fn(config: Config):
         parse_json3,
     )
 
-    caption_cache = None if config.no_cache else CaptionCache(config.cache_dir)
     clip_cache = None if config.no_cache else ClipCache(config.cache_dir)
     budget = InvocationBudget(config.max_caption_fetches, config.max_clip_downloads)
     rate_limiter = RateLimiter(
@@ -70,7 +128,31 @@ def _build_resolve_fn(config: Config):
         max_retries=config.backoff_max_retries,
     )
 
+    # Caption API circuit breaker — persists to disk so we don't waste time
+    # on subsequent runs when YouTube is rate-limiting us
+    _breaker_file = config.cache_dir / ".caption_api_breaker"
+
+    def _check_breaker() -> bool:
+        """Returns True if caption APIs should be skipped."""
+        if _breaker_file.is_file():
+            import time
+
+            age = time.time() - _breaker_file.stat().st_mtime
+            if age < 3600:  # 1 hour expiry
+                return True
+            _breaker_file.unlink(missing_ok=True)
+        return False
+
+    def _trip_breaker():
+        _breaker_file.parent.mkdir(parents=True, exist_ok=True)
+        _breaker_file.touch()
+
+    caption_api_dead = _check_breaker()
+    if caption_api_dead:
+        logger.info("Caption API circuit breaker active (tripped <1h ago), using Whisper directly")
+
     def resolve_fn(phrase: str, result: SearchResult) -> ClipInfo | None:
+        nonlocal caption_api_dead
         video_id = result.video_id
 
         try:
@@ -79,75 +161,137 @@ def _build_resolve_fn(config: Config):
             logger.warning("Caption fetch budget exhausted")
             return None
 
-        # Try to get word-level timestamps from json3
         cache_dir = config.cache_dir if not config.no_cache else None
         json3_data = None
-
-        # Method 1: yt-dlp --write-auto-subs / --write-subs
-        try:
-            rate_limiter.wait()
-            json3_data = fetch_json3(video_id, cache_dir=cache_dir, config=config)
-            rate_limiter.report_success()
-        except Exception as e:
-            logger.debug("yt-dlp json3 failed for %s: %s", video_id, e)
-
-        # Method 2: Scrape watch page for caption URLs (bypasses timedtext 429)
-        if json3_data is None:
-            try:
-                from yt_tts.core.captions import fetch_json3_via_page
-                json3_data = fetch_json3_via_page(video_id, cache_dir=cache_dir, config=config)
-                logger.info("Got json3 via page scrape for %s", video_id)
-            except Exception as e:
-                logger.debug("Page scrape json3 failed for %s: %s", video_id, e)
-
         time_range = None
         timestamp_source = "json3"
+
+        # Only try caption APIs if they haven't already failed with 429
+        if not caption_api_dead:
+            # Method 1: yt-dlp --write-auto-subs / --write-subs
+            try:
+                json3_data = fetch_json3(video_id, cache_dir=cache_dir, config=config)
+            except Exception as e:
+                err_str = str(e)
+                logger.debug("yt-dlp json3 failed for %s: %s", video_id, e)
+                if "429" in err_str or "No json3" in err_str:
+                    # Try page scrape once before giving up on APIs
+                    try:
+                        from yt_tts.core.captions import fetch_json3_via_page
+
+                        json3_data = fetch_json3_via_page(
+                            video_id, cache_dir=cache_dir, config=config
+                        )
+                        logger.info("Got json3 via page scrape for %s", video_id)
+                    except Exception as e2:
+                        if "429" in str(e2):
+                            caption_api_dead = True
+                            _trip_breaker()
+                            logger.info("Caption APIs 429 — switching to Whisper")
+                        else:
+                            logger.debug("Page scrape failed for %s: %s", video_id, e2)
+        else:
+            logger.debug("Skipping caption APIs (429 circuit breaker) for %s", video_id)
 
         if json3_data and has_word_level_timing(json3_data):
             word_timestamps = parse_json3(json3_data)
             time_range = locate_phrase(phrase, word_timestamps, config.min_confidence)
 
-        if time_range is None:
-            # Fallback to segment-level timestamps
+        if time_range is None and not caption_api_dead:
+            # Fallback to segment-level timestamps (also hits timedtext API)
             timestamp_source = "segment"
             segments = None
 
-            # Try youtube-transcript-api first
             try:
                 segments = fetch_transcript(video_id)
             except Exception as e:
+                if "429" in str(e) or "IpBlocked" in str(type(e).__name__):
+                    caption_api_dead = True
+                    _trip_breaker()
                 logger.debug("transcript-api failed for %s: %s", video_id, e)
 
-            # Fallback to yt-dlp srv1 subs if transcript-api fails
-            if segments is None:
+            if segments is None and not caption_api_dead:
                 try:
                     from yt_tts.core.captions import fetch_transcript_via_ytdlp
+
                     segments = fetch_transcript_via_ytdlp(video_id)
                 except Exception as e:
+                    if "429" in str(e):
+                        caption_api_dead = True
+                        _trip_breaker()
                     logger.debug("yt-dlp transcript also failed for %s: %s", video_id, e)
 
             if segments is not None:
                 time_range = _locate_phrase_in_segments(phrase, segments)
 
-            # Last resort: use Whisper to transcribe audio and locate phrase
-            if time_range is None and result.context_text:
-                timestamp_source = "whisper"
-                est = _estimate_from_index_text(phrase, video_id, result, config)
-                if est is not None:
-                    try:
-                        from yt_tts.core.align import transcribe_and_locate
-                        # Try the estimated window first, then shift forward if not found
-                        for shift in (0, 15000, 30000):
-                            time_range = transcribe_and_locate(
-                                video_id, phrase,
-                                est.start_ms + shift, est.end_ms + shift,
-                                config=config,
-                            )
-                            if time_range is not None:
-                                break
-                            logger.debug("Whisper didn't find phrase, shifting +%ds", shift // 1000 + 15)
-                    except Exception as e:
-                        logger.warning("Whisper alignment failed for %s: %s", video_id, e)
+        # Local alignment — runs when caption APIs are dead OR didn't find timestamps
+        # Uses CTC forced alignment with known text (from index) when available
+        if time_range is None and result.context_text:
+            timestamp_source = "aligned"
+            est = _estimate_from_index_text(phrase, video_id, result, config)
+
+            # Get transcript text near the estimated position for forced alignment.
+            # We only pass a ~200 word window, not the full transcript, because
+            # CTC forced alignment fails if targets are longer than the audio.
+            known_text = None
+            try:
+                from yt_tts.core.index import TranscriptIndex
+
+                idx = TranscriptIndex(config.db_path)
+                conn = idx._get_conn()
+                row = conn.execute(
+                    "SELECT text FROM transcripts WHERE video_id = ?",
+                    (video_id,),
+                ).fetchone()
+                if row and est:
+                    full_text = row["text"]
+                    all_words = full_text.split()
+                    total = len(all_words)
+                    if total > 0:
+                        # Estimate which words fall in the download window
+                        # Use the same word-position estimation logic
+                        import re as _re
+
+                        cleaned = _re.sub(r"[♪♫🎵🎶]+", "", full_text)
+                        clean_words = cleaned.split()
+                        # Find phrase position in clean text
+                        phrase_lower = phrase.lower()
+                        joined = " ".join(w.lower() for w in clean_words)
+                        pos = joined.find(phrase_lower)
+                        if pos >= 0:
+                            word_idx = len(joined[:pos].split())
+                        else:
+                            word_idx = total // 2
+                        # Extract ~200 word window around the phrase
+                        window = 100
+                        start_w = max(0, word_idx - window)
+                        end_w = min(total, word_idx + window)
+                        known_text = " ".join(all_words[start_w:end_w])
+            except Exception:
+                pass
+
+            if est is not None:
+                try:
+                    from yt_tts.core.align import transcribe_and_locate
+
+                    # Try the estimated window first, then shift forward
+                    # More shifts for longer videos where estimation can be way off
+                    for shift in (0, 15000, 30000, 60000, 120000):
+                        time_range = transcribe_and_locate(
+                            video_id,
+                            phrase,
+                            est.start_ms + shift,
+                            est.end_ms + shift,
+                            config=config,
+                            known_text=known_text,
+                        )
+                        if time_range is not None:
+                            break
+                        logger.debug(
+                            "Whisper didn't find phrase, shifting +%ds", shift // 1000 + 15
+                        )
+                except Exception as e:
+                    logger.warning("Whisper alignment failed for %s: %s", video_id, e)
 
         if time_range is None:
             logger.warning("Could not locate '%s' in video %s", phrase, video_id)
@@ -168,6 +312,15 @@ def _build_resolve_fn(config: Config):
             rate_limiter.report_success()
         except Exception as e:
             logger.warning("Clip extraction failed for %s: %s", video_id, e)
+            return None
+
+        # Verify the clip actually contains the expected phrase
+        if not _verify_clip(clip_path, phrase):
+            logger.warning(
+                "Clip verification failed for '%s' from %s — wrong audio",
+                phrase,
+                video_id,
+            )
             return None
 
         return ClipInfo(
@@ -216,7 +369,9 @@ def _locate_phrase_in_segments(phrase: str, segments: list[dict]) -> TimeRange |
                 end_ms = start_ms + int(seg.get("duration", 5) * 1000)
                 for seg2 in segments:
                     seg2_pos = full_text.find(seg2.get("text", "").lower())
-                    if seg2_pos is not None and seg2_pos + len(seg2.get("text", "")) >= match_pos + len(phrase_lower):
+                    if seg2_pos is not None and seg2_pos + len(
+                        seg2.get("text", "")
+                    ) >= match_pos + len(phrase_lower):
                         end_ms = int((seg2["start"] + seg2.get("duration", 5)) * 1000)
                         break
                 return TimeRange(start_ms=start_ms, end_ms=end_ms, confidence=0.3)
@@ -239,7 +394,9 @@ def _estimate_from_index_text(
     try:
         proc = subprocess.run(
             ["yt-dlp", "--print", "duration", "--", video_id],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if proc.returncode != 0 or not proc.stdout.strip():
             return None
@@ -250,6 +407,7 @@ def _estimate_from_index_text(
     # Get full transcript from index
     try:
         from yt_tts.core.index import TranscriptIndex
+
         index = TranscriptIndex(config.db_path)
         conn = index._get_conn()
         row = conn.execute(
@@ -264,7 +422,8 @@ def _estimate_from_index_text(
     # Word-based position estimation (much more accurate than character-based)
     # Strip music notation symbols which inflate word count
     import re
-    cleaned = re.sub(r'[♪♫🎵🎶]+', '', full_text)
+
+    cleaned = re.sub(r"[♪♫🎵🎶]+", "", full_text)
     all_words = cleaned.lower().split()
     phrase_words = phrase.lower().split()
     total_words = len(all_words)
@@ -274,7 +433,7 @@ def _estimate_from_index_text(
     # Find the phrase start word index via sliding window
     phrase_start_idx = None
     for i in range(total_words - len(phrase_words) + 1):
-        if all_words[i:i + len(phrase_words)] == phrase_words:
+        if all_words[i : i + len(phrase_words)] == phrase_words:
             phrase_start_idx = i
             break
 
@@ -302,8 +461,13 @@ def _estimate_from_index_text(
     frac = phrase_start_idx / total_words
     logger.info(
         "Estimated '%s' at %d-%dms (word %d/%d, %.0f%% into %ds video)",
-        phrase, start_ms, end_ms, phrase_start_idx, total_words,
-        frac * 100, video_duration_s,
+        phrase,
+        start_ms,
+        end_ms,
+        phrase_start_idx,
+        total_words,
+        frac * 100,
+        video_duration_s,
     )
 
     return TimeRange(start_ms=start_ms, end_ms=end_ms, confidence=0.1)
@@ -326,25 +490,37 @@ def synthesize(text: str, config: Config) -> SynthesisResult:
     words = text.split()
     if not words:
         return SynthesisResult(
-            output_path=None, duration_ms=0, clips=[], missing_words=[], exit_code=2,
+            output_path=None,
+            duration_ms=0,
+            clips=[],
+            missing_words=[],
+            exit_code=2,
         )
 
-    if len(words) > config.max_input_words:
+    if config.max_input_words > 0 and len(words) > config.max_input_words:
         print(
             f"Input too long: {len(words)} words (max {config.max_input_words})",
             file=sys.stderr,
         )
         return SynthesisResult(
-            output_path=None, duration_ms=0, clips=[], missing_words=words, exit_code=2,
+            output_path=None,
+            duration_ms=0,
+            clips=[],
+            missing_words=words,
+            exit_code=2,
         )
 
     # Build functions
     try:
-        search_fn = _build_search_fn(config)
+        search_fn, multi_search_fn = _build_search_fn(config)
     except Exception as e:
         logger.error("Failed to initialize search: %s", e)
         return SynthesisResult(
-            output_path=None, duration_ms=0, clips=[], missing_words=words, exit_code=3,
+            output_path=None,
+            duration_ms=0,
+            clips=[],
+            missing_words=words,
+            exit_code=3,
         )
 
     resolve_fn = _build_resolve_fn(config)
@@ -356,12 +532,16 @@ def synthesize(text: str, config: Config) -> SynthesisResult:
     except Exception as e:
         logger.error("Chunking failed: %s", e)
         return SynthesisResult(
-            output_path=None, duration_ms=0, clips=[], missing_words=words, exit_code=3,
+            output_path=None,
+            duration_ms=0,
+            clips=[],
+            missing_words=words,
+            exit_code=3,
         )
 
     # Phase 2: Resolution (parallel)
     logger.info("Resolving %d chunks...", len(plan.chunks))
-    plan = resolve_chunks(plan, resolve_fn, config)
+    plan = resolve_chunks(plan, resolve_fn, config, multi_search_fn=multi_search_fn)
 
     # Collect successful clips
     successful_clips = [c for c in plan.clips if c is not None]
@@ -400,24 +580,37 @@ def synthesize(text: str, config: Config) -> SynthesisResult:
                 if last_success_idx is not None:
                     # Count missing chunks between last success and this one
                     missing_between = sum(
-                        1 for j in range(last_success_idx + 1, i)
-                        if plan.clips[j] is None
+                        1 for j in range(last_success_idx + 1, i) if plan.clips[j] is None
                     )
                     gap = config.silence_gap_ms * missing_between if missing_between > 0 else 0
                     clip_gaps.append(gap)
                 last_success_idx = i
 
-        output_path = _make_output_path(text, config)
         final_path = stitch_clips(normalized_paths, clip_gaps, config)
-
-        # Move to output location
-        import shutil
-        shutil.move(str(final_path), str(output_path))
 
         # Calculate duration
         duration_ms = sum(c.end_ms - c.start_ms for c in successful_clips)
-
         exit_code = 0 if not plan.missing_words else 1
+
+        if config.output_stdout:
+            # Write audio bytes to stdout and discard the temp file
+            with open(final_path, "rb") as f:
+                sys.stdout.buffer.write(f.read())
+            final_path.unlink(missing_ok=True)
+            return SynthesisResult(
+                output_path=None,
+                duration_ms=duration_ms,
+                clips=successful_clips,
+                missing_words=plan.missing_words,
+                exit_code=exit_code,
+            )
+
+        output_path = _make_output_path(text, config)
+
+        # Move to output location
+        import shutil
+
+        shutil.move(str(final_path), str(output_path))
 
         return SynthesisResult(
             output_path=output_path,

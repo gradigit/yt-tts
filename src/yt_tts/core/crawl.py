@@ -10,7 +10,9 @@ from yt_tts.exceptions import CaptionFetchError
 
 logger = logging.getLogger(__name__)
 
-STARTER_CHANNELS_PATH = Path(__file__).parent.parent.parent.parent / "data" / "starter_channels.json"
+STARTER_CHANNELS_PATH = (
+    Path(__file__).parent.parent.parent.parent / "data" / "starter_channels.json"
+)
 QUOTA_FILE = Path.home() / ".local" / "share" / "yt-tts" / "api_quota.json"
 
 
@@ -84,8 +86,10 @@ def crawl_channel(url: str, index, config: Config) -> int:
             [
                 "yt-dlp",
                 "--flat-playlist",
-                "--print", "id",
-                "--print", "title",
+                "--print",
+                "id",
+                "--print",
+                "title",
                 f"https://www.youtube.com/channel/{channel_id}/videos",
             ],
             capture_output=True,
@@ -104,6 +108,7 @@ def crawl_channel(url: str, index, config: Config) -> int:
         return 0
 
     from youtube_transcript_api import YouTubeTranscriptApi
+
     from yt_tts.core.ratelimit import RateLimiter
 
     api = YouTubeTranscriptApi()

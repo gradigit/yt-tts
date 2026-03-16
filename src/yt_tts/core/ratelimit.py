@@ -1,8 +1,7 @@
 """Rate limiting, circuit breaker, and budget tracking."""
 
-import time
 import threading
-from dataclasses import dataclass, field
+import time
 
 from yt_tts.exceptions import BudgetExhaustedError
 
@@ -10,9 +9,14 @@ from yt_tts.exceptions import BudgetExhaustedError
 class RateLimiter:
     """Per-source sleep intervals with exponential backoff on 429s."""
 
-    def __init__(self, base_sleep_s: float = 2.0, backoff_initial_s: float = 2.0,
-                 backoff_multiplier: float = 2.0, backoff_max_s: float = 60.0,
-                 max_retries: int = 5):
+    def __init__(
+        self,
+        base_sleep_s: float = 2.0,
+        backoff_initial_s: float = 2.0,
+        backoff_multiplier: float = 2.0,
+        backoff_max_s: float = 60.0,
+        max_retries: int = 5,
+    ):
         self.base_sleep_s = base_sleep_s
         self.backoff_initial_s = backoff_initial_s
         self.backoff_multiplier = backoff_multiplier
@@ -44,11 +48,10 @@ class RateLimiter:
         with self._lock:
             self._consecutive_failures += 1
             if self._consecutive_failures > self.max_retries:
-                raise BudgetExhaustedError(
-                    f"Max retries ({self.max_retries}) exceeded"
-                )
+                raise BudgetExhaustedError(f"Max retries ({self.max_retries}) exceeded")
             delay = min(
-                self.backoff_initial_s * (self.backoff_multiplier ** (self._consecutive_failures - 1)),
+                self.backoff_initial_s
+                * (self.backoff_multiplier ** (self._consecutive_failures - 1)),
                 self.backoff_max_s,
             )
             return delay
@@ -78,9 +81,7 @@ class CircuitBreaker:
         """Check if the circuit is open. Raises BudgetExhaustedError if so."""
         if self.is_open:
             remaining = self._open_until - time.monotonic()
-            raise BudgetExhaustedError(
-                f"Circuit breaker open, retry in {remaining:.0f}s"
-            )
+            raise BudgetExhaustedError(f"Circuit breaker open, retry in {remaining:.0f}s")
 
     def report_success(self) -> None:
         with self._lock:

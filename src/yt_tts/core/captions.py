@@ -28,7 +28,9 @@ def _ytdlp_cookie_args(config: "Config | None" = None) -> list[str]:
     return args
 
 
-def fetch_json3(video_id: str, cache_dir: Path | None = None, config: "Config | None" = None) -> dict:
+def fetch_json3(
+    video_id: str, cache_dir: Path | None = None, config: "Config | None" = None
+) -> dict:
     """Fetch json3 captions for a YouTube video using yt-dlp.
 
     Tries --write-auto-subs first (word-level timing), then --write-subs
@@ -56,20 +58,26 @@ def fetch_json3(video_id: str, cache_dir: Path | None = None, config: "Config | 
                 "yt-dlp",
                 *cookie_args,
                 sub_flag,
-                "--sub-format", "json3",
-                "--sub-lang", "en",
+                "--sub-format",
+                "json3",
+                "--sub-lang",
+                "en",
                 "--skip-download",
                 "--no-warnings",
-                "--output", f"{tmpdir}/%(id)s.%(ext)s",
-                "--", video_id,
+                "--socket-timeout",
+                "5",
+                "--output",
+                f"{tmpdir}/%(id)s.%(ext)s",
+                "--",
+                video_id,
             ]
 
             try:
-                result = subprocess.run(
+                subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
-                    timeout=60,
+                    timeout=15,
                 )
             except FileNotFoundError:
                 raise CaptionFetchError("yt-dlp is not installed or not on PATH")
@@ -116,8 +124,9 @@ def _load_cookies_into_session(session, cookies_file: Path | None) -> None:
                 session.cookies.set(name, value, domain=domain, path=path)
 
 
-def fetch_json3_via_page(video_id: str, cache_dir: Path | None = None,
-                         config: "Config | None" = None) -> dict:
+def fetch_json3_via_page(
+    video_id: str, cache_dir: Path | None = None, config: "Config | None" = None
+) -> dict:
     """Fetch json3 captions by scraping the watch page.
 
     The watch page embeds caption track URLs in ytInitialPlayerResponse.
@@ -145,14 +154,14 @@ def fetch_json3_via_page(video_id: str, cache_dir: Path | None = None,
 
     # Extract ytInitialPlayerResponse
     import re
+
     match = re.search(r"ytInitialPlayerResponse\s*=\s*(\{.+?\});", resp.text)
     if not match:
         raise CaptionFetchError(f"No ytInitialPlayerResponse found for {video_id}")
 
     player_data = json.loads(match.group(1))
     tracks = (
-        player_data
-        .get("captions", {})
+        player_data.get("captions", {})
         .get("playerCaptionsTracklistRenderer", {})
         .get("captionTracks", [])
     )
@@ -170,9 +179,7 @@ def fetch_json3_via_page(video_id: str, cache_dir: Path | None = None,
     # Fetch the json3 using the same session (shares cookies/TLS state)
     cap_resp = session.get(en_url + "&fmt=json3")
     if cap_resp.status_code != 200:
-        raise CaptionFetchError(
-            f"Caption fetch returned {cap_resp.status_code} for {video_id}"
-        )
+        raise CaptionFetchError(f"Caption fetch returned {cap_resp.status_code} for {video_id}")
 
     data = cap_resp.json()
     if data.get("wireMagic") != "pb3":
@@ -201,9 +208,7 @@ def fetch_transcript(video_id: str) -> list[dict]:
         api = YouTubeTranscriptApi()
         transcript = api.fetch(video_id, languages=["en"])
     except Exception as e:
-        raise CaptionFetchError(
-            f"Failed to fetch transcript for {video_id}: {e}"
-        ) from e
+        raise CaptionFetchError(f"Failed to fetch transcript for {video_id}: {e}") from e
 
     return [
         {
@@ -228,12 +233,16 @@ def fetch_transcript_via_ytdlp(video_id: str) -> list[dict]:
             cmd = [
                 "yt-dlp",
                 sub_flag,
-                "--sub-format", "srv1",
-                "--sub-lang", "en",
+                "--sub-format",
+                "srv1",
+                "--sub-lang",
+                "en",
                 "--skip-download",
                 "--no-warnings",
-                "--output", f"{tmpdir}/%(id)s.%(ext)s",
-                "--", video_id,
+                "--output",
+                f"{tmpdir}/%(id)s.%(ext)s",
+                "--",
+                video_id,
             ]
 
             try:
@@ -263,10 +272,12 @@ def _parse_srv1(path: Path) -> list[dict]:
         dur = float(text_elem.get("dur", "0"))
         content = text_elem.text or ""
         if content.strip():
-            segments.append({
-                "text": content.replace("\n", " ").strip(),
-                "start": start,
-                "duration": dur,
-            })
+            segments.append(
+                {
+                    "text": content.replace("\n", " ").strip(),
+                    "start": start,
+                    "duration": dur,
+                }
+            )
 
     return segments

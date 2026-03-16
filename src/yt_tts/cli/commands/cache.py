@@ -25,6 +25,7 @@ def run_cache(args) -> int:
 
 def _cache_clear(config: Config) -> int:
     from yt_tts.core.cache import clear_all_caches
+
     cleared = clear_all_caches(config.cache_dir)
     print(f"Cleared {cleared} cached files.")
     return 0
@@ -32,9 +33,11 @@ def _cache_clear(config: Config) -> int:
 
 def _cache_stats(config: Config) -> int:
     from yt_tts.core.cache import get_cache_stats
+
     stats = get_cache_stats(config.cache_dir)
     if config.json_output:
         import json
+
         print(json.dumps(stats))
     else:
         print(f"Captions: {stats['caption_count']} files ({stats['caption_size_mb']:.1f} MB)")

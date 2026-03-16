@@ -12,6 +12,14 @@ from yt_tts.exceptions import ClipExtractionError
 logger = logging.getLogger(__name__)
 
 
+def _resolve_padding(config: Config) -> int:
+    """Resolve tightness setting to padding milliseconds."""
+    t = config.tightness
+    if isinstance(t, int):
+        return t
+    return {"tight": 30, "normal": 100, "loose": 250}.get(t, 100)
+
+
 def get_stream_url(video_id: str, format_id: str = "140") -> str:
     """Get a direct audio stream URL from YouTube using yt-dlp.
 
@@ -45,8 +53,7 @@ def get_stream_url(video_id: str, format_id: str = "140") -> str:
         )
 
     raise ClipExtractionError(
-        f"Failed to get stream URL for video {video_id} "
-        f"(tried formats: {format_id}, bestaudio)"
+        f"Failed to get stream URL for video {video_id} (tried formats: {format_id}, bestaudio)"
     )
 
 
@@ -67,9 +74,12 @@ def validate_clip(path: Path, expected_duration_ms: int | None = None) -> bool:
             result = subprocess.run(
                 [
                     "ffprobe",
-                    "-v", "error",
-                    "-show_entries", "format=duration",
-                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
                     str(path),
                 ],
                 capture_output=True,
@@ -126,8 +136,8 @@ def extract_clip(
             logger.debug("Cache hit: %s", cached)
             return cached
 
-    # Compute timing with padding
-    padding_ms = config.clip_padding_ms
+    # Compute timing with padding (respects tightness setting)
+    padding_ms = _resolve_padding(config)
     padded_start_ms = max(0, start_ms - padding_ms)
     padded_end_ms = end_ms + padding_ms
     duration_ms = padded_end_ms - padded_start_ms
@@ -146,11 +156,16 @@ def extract_clip(
         cmd = [
             "ffmpeg",
             "-y",
-            "-ss", f"{start_s:.3f}",
-            "-i", stream_url,
-            "-t", f"{duration_s:.3f}",
-            "-c:a", "aac",
-            "-b:a", config.audio_bitrate,
+            "-ss",
+            f"{start_s:.3f}",
+            "-i",
+            stream_url,
+            "-t",
+            f"{duration_s:.3f}",
+            "-c:a",
+            "aac",
+            "-b:a",
+            config.audio_bitrate,
             str(output_path),
         ]
         logger.debug("Running: %s", " ".join(cmd))
@@ -167,23 +182,18 @@ def extract_clip(
     if result.returncode != 0:
         stderr = result.stderr or ""
         if "403" in stderr or "410" in stderr:
-            logger.warning(
-                "HTTP 403/410 for %s — retrying with fresh URL", video_id
-            )
+            logger.warning("HTTP 403/410 for %s — retrying with fresh URL", video_id)
             url = get_stream_url(video_id, config.preferred_format)
             result = _run_ffmpeg(url)
 
     if result.returncode != 0:
         raise ClipExtractionError(
-            f"ffmpeg failed for {video_id} [{start_ms}-{end_ms}]: "
-            f"{(result.stderr or '').strip()}"
+            f"ffmpeg failed for {video_id} [{start_ms}-{end_ms}]: {(result.stderr or '').strip()}"
         )
 
     # 5. Validate
     if not validate_clip(output_path, expected_duration_ms=duration_ms):
-        raise ClipExtractionError(
-            f"Clip validation failed for {video_id} [{start_ms}-{end_ms}]"
-        )
+        raise ClipExtractionError(f"Clip validation failed for {video_id} [{start_ms}-{end_ms}]")
 
     # 6. Cache and return
     if cache is not None:
