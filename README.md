@@ -24,22 +24,11 @@ yt-tts "the meaning of life"
 
 No YouTube API key needed. All alignment runs locally.
 
-## Install
-
-```bash
-uv tool install yt-tts
-```
-
-**Requirements:** Python 3.11+, [ffmpeg](https://ffmpeg.org/download.html), [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+The one-liner installs all dependencies (uv, ffmpeg, yt-dlp), the CLI tool, agent skills, and a starter index (~27K transcripts, ~100MB) so it works immediately.
 
 ## Quick Start
 
 ```bash
-# Build the transcript index (downloads from YouTube-Commons on HuggingFace)
-uv tool install "yt-tts[bootstrap]"
-yt-tts index init --subset 1  # ~27K transcripts from 1 parquet file
-yt-tts index init              # full 3.15M transcripts (needs ~58GB disk)
-
 # Synthesize
 yt-tts "hello world"
 yt-tts "I can't believe you've done this" -o output.mp3
@@ -51,9 +40,22 @@ yt-tts --video "https://youtube.com/watch?v=VIDEO_ID" "phrase from that video"
 # Batch mode
 echo -e "hello world\ngoodbye world" > phrases.txt
 yt-tts batch phrases.txt -o clips/
+```
 
-# Search the index
-yt-tts index search "machine learning"
+## Transcript Index
+
+The installer bootstraps a starter index (~27K transcripts, ~100MB). For better phrase coverage, download the full index:
+
+```bash
+yt-tts index init              # full 3.15M transcripts (~58GB)
+```
+
+You can also grow the index incrementally:
+
+```bash
+yt-tts index add-video "https://youtube.com/watch?v=VIDEO_ID"
+yt-tts index add-channel "https://youtube.com/@ChannelName"
+yt-tts index search "phrase to find"
 yt-tts index stats
 ```
 

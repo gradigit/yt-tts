@@ -1,6 +1,9 @@
 #!/bin/sh
 set -e
 
+REPO_URL="https://github.com/gradigit/yt-tts.git"
+INSTALL_DIR="$HOME/.local/share/yt-tts/repo"
+
 echo "Installing yt-tts..."
 
 # Install uv if missing
@@ -33,23 +36,30 @@ if ! command -v yt-dlp >/dev/null 2>&1; then
     uv tool install yt-dlp
 fi
 
-# Install yt-tts from GitHub
-echo "Installing yt-tts..."
-uv tool install "yt-tts[bootstrap] @ git+https://github.com/gradigit/yt-tts.git"
+# Clone repo
+if [ -d "$INSTALL_DIR" ]; then
+    echo "Updating yt-tts repo..."
+    git -C "$INSTALL_DIR" pull --quiet
+else
+    echo "Cloning yt-tts..."
+    git clone --quiet "$REPO_URL" "$INSTALL_DIR"
+fi
 
-# Install Claude Code skill
-REPO_URL="https://raw.githubusercontent.com/gradigit/yt-tts/master/skill/SKILL.md"
+# Install yt-tts from local clone
+uv tool install --from "$INSTALL_DIR[bootstrap]" yt-tts
+
+# Symlink skills from repo
 CLAUDE_DIR="$HOME/.claude/skills/yt-tts"
 AGENTS_DIR="$HOME/.agents/skills/yt-tts"
 
 mkdir -p "$CLAUDE_DIR" "$AGENTS_DIR"
-curl -LsSf "$REPO_URL" -o "$CLAUDE_DIR/SKILL.md"
-ln -sf "$CLAUDE_DIR/SKILL.md" "$AGENTS_DIR/SKILL.md"
-echo "Installed skill → ~/.claude/skills/yt-tts/ + ~/.agents/skills/yt-tts/"
+ln -sf "$INSTALL_DIR/skill/SKILL.md" "$CLAUDE_DIR/SKILL.md"
+ln -sf "$INSTALL_DIR/skill/SKILL.md" "$AGENTS_DIR/SKILL.md"
+echo "Linked skill → ~/.claude/skills/yt-tts/ + ~/.agents/skills/yt-tts/"
 
-# Bootstrap a starter index (~27K transcripts) so it works immediately
+# Bootstrap starter index (~27K transcripts, ~100MB)
 echo ""
-echo "Bootstrapping starter index (1 parquet file, ~27K transcripts)..."
+echo "Bootstrapping starter index (~27K transcripts)..."
 yt-tts index init --subset 1
 
 echo ""
