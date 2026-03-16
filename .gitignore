@@ -37,6 +37,7 @@ cookies.txt
 
 # OS
 .DS_Store
+._.DS_Store
 Thumbs.db
 
 # Spikes output
@@ -46,17 +47,20 @@ spikes/*.mp3
 spikes/*.wav
 
 # YTP project outputs
+ytp/*.mp3
+ytp/*.mp4
 ytp/clips/
 ytp/visual_src/
 ytp/processed/
 ytp/work*/
-ytp/*.mp4
 ytp/_temp*
 
 # Generated audio
 yt-tts-*.mp3
 yt-tts-*.wav
+test_*.mp3
 demo*.mp3
+stress_clips/
 
 # Forge orchestrator artifacts
 FORGE-STATUS.md

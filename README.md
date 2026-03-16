@@ -23,7 +23,7 @@ No YouTube API key needed. All alignment runs locally.
 ## Install
 
 ```bash
-uv sync
+pip install yt-tts
 ```
 
 **Requirements:** Python 3.11+, [ffmpeg](https://ffmpeg.org/download.html), [yt-dlp](https://github.com/yt-dlp/yt-dlp)
@@ -32,7 +32,7 @@ uv sync
 
 ```bash
 # Build the transcript index (downloads from YouTube-Commons on HuggingFace)
-uv sync --extra bootstrap
+pip install "yt-tts[bootstrap]"
 yt-tts index init --subset 1  # ~27K transcripts from 1 parquet file
 yt-tts index init              # full 3.15M transcripts (needs ~58GB disk)
 
