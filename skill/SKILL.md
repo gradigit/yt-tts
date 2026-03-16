@@ -110,7 +110,7 @@ yt-tts index search "phrase to find"
 yt-tts index add-video "https://youtube.com/watch?v=VIDEO_ID"
 
 # Bootstrap from YouTube-Commons (large dataset, ~600MB per parquet file)
-uv pip install "yt-tts[bootstrap]"
+uv sync --extra bootstrap
 yt-tts index init --subset 1
 ```
 

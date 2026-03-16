@@ -4,9 +4,9 @@ YouTube Text-to-Speech — turns any text into audio by finding and stitching Yo
 
 ## Build Commands
 ```
-uv pip install -e .              # install (includes faster-whisper, curl_cffi, torchaudio)
-uv pip install -e ".[dev]"       # + test deps (pytest, ruff)
-uv pip install -e ".[bootstrap]" # + bootstrap deps (huggingface_hub, pyarrow)
+uv sync                          # install (includes faster-whisper, curl_cffi, torchaudio)
+uv sync --extra dev              # + test deps (pytest, ruff)
+uv sync --extra bootstrap        # + bootstrap deps (huggingface_hub, pyarrow)
 yt-tts "hello world"          # synthesize (requires populated index)
 yt-tts --video URL "hello"    # use specific video (no index needed)
 yt-tts index init             # download YouTube-Commons (3.15M transcripts)
