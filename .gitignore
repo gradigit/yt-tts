@@ -23,6 +23,7 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
+tests/
 
 # Data
 *.db
@@ -31,6 +32,7 @@ htmlcov/
 
 # Cache
 .cache/
+.ruff_cache/
 
 # Cookies (contains auth tokens - never commit)
 cookies.txt
@@ -40,26 +42,20 @@ cookies.txt
 ._.DS_Store
 Thumbs.db
 
-# Spikes output
-spikes/*.json3
-spikes/*.m4a
-spikes/*.mp3
-spikes/*.wav
+# Dev docs
+CLAUDE.md
+HANDOFF.md
+TODO.md
+architect/
+spikes/
 
-# YTP project outputs
-ytp/*.mp3
-ytp/*.mp4
-ytp/clips/
-ytp/visual_src/
-ytp/processed/
-ytp/work*/
-ytp/_temp*
+# YTP project
+ytp/
 
 # Generated audio
-yt-tts-*.mp3
-yt-tts-*.wav
-test_*.mp3
-demo*.mp3
+*.mp3
+*.wav
+*.m4a
 stress_clips/
 
 # Forge orchestrator artifacts
@@ -70,6 +66,4 @@ HUMAN-INPUT.md
 MISSION-CONTROL.md
 SUGGESTIONS.md
 DEFERRED-CHANGES.md
-architect/agent-contexts/
-architect/review-findings/
-.claude/forge-scopes.json
+.claude/
