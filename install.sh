@@ -48,14 +48,16 @@ fi
 # Install yt-tts from local clone
 uv tool install --from "$INSTALL_DIR[bootstrap]" yt-tts
 
-# Symlink skills from repo
+# Symlink skill to all agent platforms
 CLAUDE_DIR="$HOME/.claude/skills/yt-tts"
+CODEX_DIR="$HOME/.codex/skills/yt-tts"
 AGENTS_DIR="$HOME/.agents/skills/yt-tts"
 
-mkdir -p "$CLAUDE_DIR" "$AGENTS_DIR"
+mkdir -p "$CLAUDE_DIR" "$CODEX_DIR" "$AGENTS_DIR"
 ln -sf "$INSTALL_DIR/skill/SKILL.md" "$CLAUDE_DIR/SKILL.md"
+ln -sf "$INSTALL_DIR/skill/SKILL.md" "$CODEX_DIR/SKILL.md"
 ln -sf "$INSTALL_DIR/skill/SKILL.md" "$AGENTS_DIR/SKILL.md"
-echo "Linked skill → ~/.claude/skills/yt-tts/ + ~/.agents/skills/yt-tts/"
+echo "Linked skill → ~/.claude/skills/ + ~/.codex/skills/ + ~/.agents/skills/"
 
 # Bootstrap starter index (~27K transcripts, ~100MB)
 echo ""
