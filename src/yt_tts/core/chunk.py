@@ -65,7 +65,8 @@ def chunk_phrase(
         matched = False
 
         # Try longest phrase first, shrinking down
-        for end in range(len(words), i, -1):
+        max_end = len(words) if config.max_chunk_words <= 0 else min(i + config.max_chunk_words, len(words))
+        for end in range(max_end, i, -1):
             phrase = " ".join(words[i:end])
             normalized = " ".join(_normalize_word(w) for w in words[i:end])
 

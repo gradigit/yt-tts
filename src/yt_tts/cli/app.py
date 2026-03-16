@@ -283,6 +283,7 @@ def _dispatch_synthesize(args: list[str]) -> int:
     tightness = "normal"
     asr_backend = "auto"
     asr_model = "tiny"
+    max_chunk_words = 0
 
     i = 0
     while i < len(args):
@@ -318,6 +319,12 @@ def _dispatch_synthesize(args: list[str]) -> int:
         elif arg == "--cookies" and i + 1 < len(args):
             cookies_file = args[i + 1]
             i += 2
+        elif arg == "--max-chunk" and i + 1 < len(args):
+            max_chunk_words = int(args[i + 1])
+            i += 2
+        elif arg == "--word-by-word":
+            max_chunk_words = 1
+            i += 1
         elif arg == "--no-cache":
             no_cache = True
             i += 1
@@ -368,6 +375,7 @@ def _dispatch_synthesize(args: list[str]) -> int:
     a.tightness = tightness
     a.asr_backend = asr_backend
     a.asr_model = asr_model
+    a.max_chunk_words = max_chunk_words
 
     from yt_tts.cli.commands.synthesize import run_synthesize
 

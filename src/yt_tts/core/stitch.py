@@ -87,7 +87,22 @@ def normalize_clip(clip_path: Path, config: Config) -> Path:
     except json.JSONDecodeError as exc:
         raise StitchError(f"Invalid loudnorm JSON for {clip_path}: {exc}") from exc
 
-    input_i = float(measured["input_i"])
+    input_i_raw = measured["input_i"]
+    input_i = float(input_i_raw)
+
+    # Guard against -inf (too short or silent clips) — skip normalization
+    import math
+    if not math.isfinite(input_i):
+        logger.debug("Skipping normalization for %s (input_i=%s)", clip_path.name, input_i_raw)
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", prefix="yt-tts-norm-", delete=False)
+        tmp.close()
+        output_path = Path(tmp.name)
+        af = f"alimiter=limit=0.95,aresample={config.sample_rate}"
+        cmd_copy = ["ffmpeg", "-y", "-i", str(clip_path), "-af", af, str(output_path)]
+        result = _run_ffmpeg(cmd_copy)
+        if result.returncode != 0:
+            raise StitchError(f"Resample failed for {clip_path}: {result.stderr.strip()}")
+        return output_path
 
     # --- Decide how much to adjust ---
     # If clip is within the window, just resample (no volume change)

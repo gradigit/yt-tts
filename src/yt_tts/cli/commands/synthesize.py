@@ -84,6 +84,7 @@ def run_synthesize(args) -> int:
         tightness=getattr(args, "tightness", "normal"),
         asr_backend=getattr(args, "asr_backend", "auto"),
         asr_model=getattr(args, "asr_model", "tiny"),
+        max_chunk_words=getattr(args, "max_chunk_words", 0),
     )
 
     # Handle --output

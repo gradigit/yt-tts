@@ -36,6 +36,7 @@ class Config:
     # Chunking (no arbitrary limits — longer input just takes longer)
     max_input_words: int = 0  # 0 = no limit
     max_clips: int = 0  # 0 = no limit
+    max_chunk_words: int = 0  # 0 = no limit (greedy longest-match), 1 = word-by-word Bumblebee mode
     chunk_search_timeout_s: float = 30.0
     chunk_resolve_timeout_s: float = 30.0
 
