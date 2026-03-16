@@ -1,44 +1,52 @@
 # yt-tts
 
-**Turn text into audio by stitching YouTube clips** — like Bumblebee speaking through radio clips.
+Type any sentence. Get back an audio file where every word is spoken by a different YouTuber — stitched together like Bumblebee speaking through radio clips.
 
-Every word comes from a different YouTube video. An art project giving AI agents "the voice of the internet."
+https://github.com/user-attachments/assets/DEMO_PLACEHOLDER
+
+## Install
+
+One command installs everything (uv, ffmpeg, yt-dlp, the CLI, agent skills, and a starter transcript index):
 
 ```bash
 curl -LsSf https://raw.githubusercontent.com/gradigit/yt-tts/master/install.sh | sh
 ```
 
+Then:
+
 ```bash
 yt-tts "the meaning of life"
-# → yt-tts-a1b2c3d4.mp3 (clips from 4 different YouTubers)
 ```
 
-## How It Works
+That's it. Each word gets sourced from a different YouTube video and stitched into a single MP3.
 
-1. **Search** — Finds your phrase in 3.15M YouTube transcripts (SQLite FTS5 index)
-2. **Chunk** — Greedy longest-match: "never gonna give you up" = 1 clip, not 5 words
-3. **Align** — Downloads audio, runs CTC forced alignment (MMS_FA) for ~30ms word boundaries
-4. **Extract** — ffmpeg cuts the exact segment from the YouTube stream
-5. **Verify** — ASR-verifies the clip matches expected text; retries with next candidate if not
-6. **Stitch** — Gentle loudness normalization (±6 LU) + crossfade into a single MP3
+## What it does
 
-No YouTube API key needed. All alignment runs locally.
+You give it text. It searches 3.15M YouTube transcripts to find videos where those exact words are spoken, downloads the audio, cuts the precise word boundaries using CTC forced alignment (~30ms accuracy), verifies each clip with ASR, and crossfades them into one file.
 
-The one-liner installs all dependencies (uv, ffmpeg, yt-dlp), the CLI tool, agent skills, and a starter index (~27K transcripts, ~100MB) so it works immediately.
+```
+"I can't believe you've done this"
+  → "I can't believe" from a tech review
+  → "you've done this" from a cooking vlog
+  → stitched into one MP3
+```
 
-## Quick Start
+No YouTube API key. No cloud ASR. Everything runs locally.
+
+## Usage
 
 ```bash
-# Synthesize
+# Basic synthesis
 yt-tts "hello world"
-yt-tts "I can't believe you've done this" -o output.mp3
-yt-tts --json "the answer is probably not"  # structured JSON output
+yt-tts "never gonna give you up" -o output.mp3
 
 # Use a specific video (no index needed)
 yt-tts --video "https://youtube.com/watch?v=VIDEO_ID" "phrase from that video"
 
+# JSON output (for agents / programmatic use)
+yt-tts --json "the answer is probably not"
+
 # Batch mode
-echo -e "hello world\ngoodbye world" > phrases.txt
 yt-tts batch phrases.txt -o clips/
 ```
 
@@ -59,6 +67,40 @@ yt-tts index search "phrase to find"
 yt-tts index stats
 ```
 
+## Agent Integration
+
+The installer symlinks the yt-tts skill to `~/.claude/skills/` and `~/.agents/skills/`. Any agent that reads skills from those directories can use yt-tts to generate audio.
+
+```bash
+# Agents should use --json for structured output
+yt-tts --json "hello world"
+```
+
+```json
+{
+  "output_path": "yt-tts-a1b2c3d4.mp3",
+  "duration_ms": 3200,
+  "clips": [
+    {
+      "video_id": "dQw4w9WgXcQ",
+      "phrase": "never gonna give you up",
+      "start_ms": 42611,
+      "end_ms": 44791,
+      "confidence": 0.84
+    }
+  ],
+  "missing_words": [],
+  "exit_code": 0
+}
+```
+
+| Exit Code | Meaning |
+|-----------|---------|
+| 0 | All words found and stitched |
+| 1 | Partial — some words missing (silence inserted) |
+| 2 | No matches found |
+| 3 | System error |
+
 ## CLI Reference
 
 ```
@@ -67,15 +109,12 @@ yt-tts [options] "text to synthesize"
 Options:
   --video URL            Use a specific YouTube video (bypass index)
   --voice CHANNEL        Constrain clips to one channel
-  --output PATH, -o      Output file ('-' for stdout)
+  -o PATH                Output file ('-' for stdout)
   --format {mp3,wav}     Output format (default: mp3)
-  --cookies FILE         YouTube cookies file (bypass rate limits)
-  --cookies-from-browser BROWSER  Use browser cookies (chrome, firefox)
-  --no-cache             Disable clip/caption caching
+  --no-cache             Disable caching
   --no-crossfade         Hard cuts between clips
   --json                 Structured JSON output
   --verbose              Debug logging
-  --version              Show version
 
 Subcommands:
   index init [--subset N]     Build transcript index from YouTube-Commons
@@ -88,60 +127,14 @@ Subcommands:
   cache clear                 Clear all caches
 ```
 
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | All words found and stitched |
-| 1 | Partial — some words missing (silence gaps inserted) |
-| 2 | No matches found |
-| 3 | System error (missing ffmpeg, network failure) |
-
-## JSON Output
-
-```json
-{
-  "output_path": "yt-tts-a1b2c3d4.mp3",
-  "duration_ms": 3200,
-  "clips": [
-    {
-      "video_id": "dQw4w9WgXcQ",
-      "phrase": "never gonna give you up",
-      "start_ms": 42611,
-      "end_ms": 44791,
-      "confidence": 0.84,
-      "timestamp_source": "ctc_alignment"
-    }
-  ],
-  "missing_words": [],
-  "exit_code": 0
-}
-```
-
-## Architecture
+## How It Works
 
 ```
-Text input
-  │
-  ▼ chunk_phrase() — greedy longest-match
-  │  "I can't believe" → MATCH (video A)
-  │  "you've done this" → MATCH (video B)
-  │
-  ▼ Parallel resolution (ThreadPoolExecutor, 3 workers):
-  │  For each chunk:
-  │  ├─ Search FTS5 index → video_id
-  │  ├─ Estimate position from word index
-  │  ├─ Download audio segment (yt-dlp stream URL)
-  │  ├─ CTC forced alignment (known text → timestamps, ~30ms accuracy)
-  │  ├─ ffmpeg extract clip
-  │  └─ ASR verify → retry next candidate if mismatch
-  │
-  ▼ stitch_clips()
-  │  ├─ Gentle loudness normalization (±6 LU window)
-  │  ├─ Silence gaps for missing words
-  │  └─ Concat + crossfade
-  │
-  ▼ Output: MP3/WAV
+Text → chunk (greedy longest-match)
+  → search FTS5 index → download audio (yt-dlp)
+  → CTC forced alignment (known text → ~30ms word boundaries)
+  → extract clip (ffmpeg) → ASR verify → retry next candidate if wrong
+  → stitch (gentle loudnorm ±6 LU + crossfade) → MP3/WAV
 ```
 
 ## Python API
@@ -154,21 +147,7 @@ result = synthesize("hello world", Config())
 print(result.output_path)    # Path to MP3
 print(result.clips)          # List of ClipInfo
 print(result.missing_words)  # Words not found
-print(result.exit_code)      # 0, 1, 2, or 3
 ```
-
-## GPU Acceleration
-
-yt-tts auto-detects the best compute backend:
-- **NVIDIA GPU** — faster-whisper (CUDA) for ASR verification
-- **Apple Silicon** — parakeet-mlx or mlx-whisper (Metal)
-- **CPU** — faster-whisper (int8 quantized)
-
-CTC forced alignment runs on CPU and is fast (~100ms per clip). ASR verification is the GPU-accelerated step.
-
-## Disclaimer
-
-This tool downloads short audio clips from YouTube for transformative remix purposes. Users are responsible for ensuring their use complies with YouTube's Terms of Service and applicable copyright law. This is an art/research project — not a piracy tool.
 
 ## License
 
