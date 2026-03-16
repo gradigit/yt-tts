@@ -16,23 +16,9 @@ Trigger when the user or agent wants to:
 - "Bumblebee this", "YouTube voice"
 - Any request to produce `.mp3` or `.wav` audio from text
 
-## Prerequisites
-
-The `yt-tts` CLI must be run from within its virtualenv:
-
-```bash
-source /home/lechat/Projects/yt-tts/.venv/bin/activate
-```
-
-Required external tools (already installed):
-- `ffmpeg` — audio processing
-- `yt-dlp` — YouTube audio download
-
 ## Quick Start
 
 ```bash
-source /home/lechat/Projects/yt-tts/.venv/bin/activate
-
 # Basic synthesis (requires populated index)
 yt-tts "hello world"
 
@@ -62,7 +48,7 @@ Always use `--json` when calling from an agent context. The output is structured
       "start_ms": 42611,
       "end_ms": 44791,
       "confidence": 0.84,
-      "timestamp_source": "whisper"
+      "timestamp_source": "ctc_alignment"
     }
   ],
   "missing_words": [],
@@ -90,7 +76,7 @@ Always use `--json` when calling from an agent context. The output is structured
 | `--voice CHANNEL` | Constrain all clips to one channel |
 | `--no-cache` | Disable caching (re-download everything) |
 | `--no-crossfade` | Hard cuts between clips instead of crossfade |
-| `--cookies FILE` | YouTube cookies file (bypass rate limits) |
+| `--cookies FILE` | YouTube cookies file |
 | `--verbose` | Debug logging to stderr |
 
 ## Index Management
@@ -98,8 +84,6 @@ Always use `--json` when calling from an agent context. The output is structured
 The tool searches a local SQLite FTS5 index of YouTube transcripts:
 
 ```bash
-source /home/lechat/Projects/yt-tts/.venv/bin/activate
-
 # Check index status
 yt-tts index stats
 
@@ -109,9 +93,8 @@ yt-tts index search "phrase to find"
 # Add a specific video
 yt-tts index add-video "https://youtube.com/watch?v=VIDEO_ID"
 
-# Bootstrap from YouTube-Commons (large dataset, ~600MB per parquet file)
-uv sync --extra bootstrap
-yt-tts index init --subset 1
+# Bootstrap full index (3.15M transcripts, ~58GB)
+yt-tts index init
 ```
 
 ## How It Works
@@ -141,8 +124,6 @@ If synthesis fails:
 ## Example Agent Workflow
 
 ```bash
-source /home/lechat/Projects/yt-tts/.venv/bin/activate
-
 # Generate audio and capture result
 RESULT=$(yt-tts --json "the quick brown fox")
 

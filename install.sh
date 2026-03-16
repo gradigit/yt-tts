@@ -33,21 +33,28 @@ if ! command -v yt-dlp >/dev/null 2>&1; then
     uv tool install yt-dlp
 fi
 
-# Install yt-tts
-uv tool install yt-tts
+# Install yt-tts from GitHub
+echo "Installing yt-tts..."
+uv tool install "yt-tts[bootstrap] @ git+https://github.com/gradigit/yt-tts.git"
 
 # Install Claude Code skill
-SKILL_URL="https://raw.githubusercontent.com/gradigit/yt-tts/master/skill/SKILL.md"
-SKILL_DIR="$HOME/.claude/skills/yt-tts"
-mkdir -p "$SKILL_DIR"
-curl -LsSf "$SKILL_URL" -o "$SKILL_DIR/SKILL.md"
-echo "Installed Claude Code skill → $SKILL_DIR/SKILL.md"
-
-# Install Agents skill
+REPO_URL="https://raw.githubusercontent.com/gradigit/yt-tts/master/skill/SKILL.md"
+CLAUDE_DIR="$HOME/.claude/skills/yt-tts"
 AGENTS_DIR="$HOME/.agents/skills/yt-tts"
-mkdir -p "$AGENTS_DIR"
-ln -sf "$SKILL_DIR/SKILL.md" "$AGENTS_DIR/SKILL.md"
-echo "Installed Agents skill → $AGENTS_DIR/SKILL.md"
+
+mkdir -p "$CLAUDE_DIR" "$AGENTS_DIR"
+curl -LsSf "$REPO_URL" -o "$CLAUDE_DIR/SKILL.md"
+ln -sf "$CLAUDE_DIR/SKILL.md" "$AGENTS_DIR/SKILL.md"
+echo "Installed skill → ~/.claude/skills/yt-tts/ + ~/.agents/skills/yt-tts/"
+
+# Bootstrap a starter index (~27K transcripts) so it works immediately
+echo ""
+echo "Bootstrapping starter index (1 parquet file, ~27K transcripts)..."
+yt-tts index init --subset 1
 
 echo ""
-echo "Done! Run: yt-tts \"hello world\""
+echo "yt-tts is ready! Try:"
+echo "  yt-tts \"hello world\""
+echo ""
+echo "For the full index (3.15M transcripts, ~58GB):"
+echo "  yt-tts index init"
