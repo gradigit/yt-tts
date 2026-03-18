@@ -294,6 +294,9 @@ def _forced_align_ctc(audio_path: str, known_text: str) -> TranscribeResult:
             audio_path, transcript_path, model=_fa_model, model_type="MMS_FA"
         )
         _fa_model = model  # cache for reuse
+    except Exception:
+        _fa_model = None  # don't reuse a potentially bad model
+        raise
     finally:
         import os
 

@@ -354,12 +354,19 @@ def _stitch_filter_complex(
     n_streams = len(inputs)
     labels = [f"[{i}:a]" for i in range(n_streams)]
 
-    if crossfade_ms > 0 and len(clips) == 2 and all(g == 0 for g in gaps):
-        # Special case: two clips, no gap, with crossfade
+    if crossfade_ms > 0 and all(g == 0 for g in gaps) and len(clips) >= 2:
+        # Chain acrossfade between adjacent clips (no silence gaps)
         cf_s = crossfade_ms / 1000.0
-        filter_complex = f"[0:a][1:a]acrossfade=d={cf_s:.3f}:c1=tri:c2=tri[out]"
+        # Build chain: [0:a][1:a]acrossfade=...[cf0]; [cf0][2:a]acrossfade=...[cf1]; ...
+        prev = "[0:a]"
+        parts = []
+        for i in range(1, len(clips)):
+            out_label = "[out]" if i == len(clips) - 1 else f"[cf{i-1}]"
+            parts.append(f"{prev}[{i}:a]acrossfade=d={cf_s:.3f}:c1=tri:c2=tri{out_label}")
+            prev = out_label
+        filter_complex = ";".join(parts)
     else:
-        # General case: concat all inputs
+        # General case: concat all inputs (clips + silence interleaved)
         filter_complex = "".join(labels) + f"concat=n={n_streams}:v=0:a=1[out]"
 
     if ext == "mp3":

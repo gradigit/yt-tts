@@ -14,7 +14,7 @@ from yt_tts.types import ClipInfo, SearchResult, SynthesisResult, TimeRange
 logger = logging.getLogger(__name__)
 
 
-def _verify_clip(clip_path: Path, expected_phrase: str, threshold: float = 0.6) -> bool:
+def _verify_clip(clip_path: Path, expected_phrase: str, threshold: float = 0.8) -> bool:
     """Verify a clip actually contains the expected phrase by running ASR on it.
 
     Uses sequential word matching (not just bag-of-words) to catch clips
@@ -60,7 +60,7 @@ def _verify_clip(clip_path: Path, expected_phrase: str, threshold: float = 0.6) 
         )
         return accuracy >= threshold
     except Exception as e:
-        logger.debug("Verify clip failed: %s", e)
+        logger.warning("Verify clip: ASR failed (%s), accepting clip unverified", type(e).__name__)
         return True  # don't block on verification errors
 
 
@@ -234,6 +234,10 @@ def _build_resolve_fn(config: Config):
             # We only pass a ~200 word window, not the full transcript, because
             # CTC forced alignment fails if targets are longer than the audio.
             known_text = None
+            all_words = []
+            word_idx = 0
+            window = 100
+            total = 0
             try:
                 from yt_tts.core.index import TranscriptIndex
 
@@ -277,6 +281,13 @@ def _build_resolve_fn(config: Config):
                     # Try the estimated window first, then shift forward
                     # More shifts for longer videos where estimation can be way off
                     for shift in (0, 15000, 30000, 60000, 120000):
+                        # Recompute known_text window for each shift
+                        # (~2.5 words/sec is typical speech rate)
+                        if shift > 0 and all_words:
+                            shift_words = int(shift / 1000 * 2.5)
+                            sw = max(0, word_idx - window + shift_words)
+                            ew = min(total, word_idx + window + shift_words)
+                            known_text = " ".join(all_words[sw:ew])
                         time_range = transcribe_and_locate(
                             video_id,
                             phrase,
@@ -354,27 +365,29 @@ def _locate_phrase_in_segments(phrase: str, segments: list[dict]) -> TimeRange |
 
     # Try spanning multiple segments
     full_text = " ".join(seg.get("text", "") for seg in segments).lower()
-    if phrase_lower in full_text:
-        # Find which segments contain the phrase
+    match_pos = full_text.find(phrase_lower)
+    if match_pos != -1:
+        match_end = match_pos + len(phrase_lower)
+        # Find which segments the match spans
         pos = 0
+        start_seg = None
+        end_seg = None
         for seg in segments:
             seg_text = seg.get("text", "")
             seg_start = pos
-            pos += len(seg_text) + 1  # +1 for space
+            seg_end = pos + len(seg_text)
+            pos = seg_end + 1  # +1 for space
 
-            match_pos = full_text.find(phrase_lower)
-            if match_pos is not None and seg_start <= match_pos < pos:
-                start_ms = int(seg["start"] * 1000)
-                # Find end segment
-                end_ms = start_ms + int(seg.get("duration", 5) * 1000)
-                for seg2 in segments:
-                    seg2_pos = full_text.find(seg2.get("text", "").lower())
-                    if seg2_pos is not None and seg2_pos + len(
-                        seg2.get("text", "")
-                    ) >= match_pos + len(phrase_lower):
-                        end_ms = int((seg2["start"] + seg2.get("duration", 5)) * 1000)
-                        break
-                return TimeRange(start_ms=start_ms, end_ms=end_ms, confidence=0.3)
+            if start_seg is None and seg_end > match_pos:
+                start_seg = seg
+            if seg_end >= match_end:
+                end_seg = seg
+                break
+
+        if start_seg and end_seg:
+            start_ms = int(start_seg["start"] * 1000)
+            end_ms = int((end_seg["start"] + end_seg.get("duration", 5)) * 1000)
+            return TimeRange(start_ms=start_ms, end_ms=end_ms, confidence=0.3)
 
     return None
 
@@ -445,8 +458,8 @@ def _estimate_from_index_text(
         if char_pos == -1:
             return None
         # Count words before this position
-        phrase_start_idx = len(joined[:char_pos].split()) - 1
-        phrase_start_idx = max(0, phrase_start_idx)
+        prefix = joined[:char_pos]
+        phrase_start_idx = len(prefix.split()) if prefix.strip() else 0
 
     # Estimate time based on word position fraction
     secs_per_word = video_duration_s / total_words

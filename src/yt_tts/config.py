@@ -42,7 +42,6 @@ class Config:
 
     # Extraction
     preferred_format: str = "140"  # m4a
-    clip_padding_ms: int = 100
     audio_bitrate: str = "128k"
 
     # Tightness control — how clips are trimmed around word boundaries
@@ -50,7 +49,7 @@ class Config:
     # "normal" = small padding for natural sound (default)
     # "loose" = generous padding, more context around words
     # Can also be an int (ms of padding around word boundaries)
-    tightness: str | int = "normal"
+    tightness: str | int = "tight"
 
     # ASR backend selection
     # "auto" = CUDA→faster-whisper, MLX→mlx-whisper, CPU→faster-whisper
