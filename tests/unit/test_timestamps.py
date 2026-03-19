@@ -31,8 +31,9 @@ class TestParseJson3:
         # Third word: "this" at tStartMs=1000 + tOffsetMs=1000
         assert words[2].word == "this"
         assert words[2].start_ms == 2000
-        # Last word in event: tStartMs + dDurationMs = 1000 + 3000 = 4000
-        assert words[2].end_ms == 4000
+        # Last word in event: estimated from avg word duration (500ms avg * 1.2 = 600ms)
+        # 2000 + 600 = 2600, capped at event end 4000
+        assert words[2].end_ms == 2600
         assert words[2].confidence == 190
 
         # Fourth word: "is" at tStartMs=4000 + tOffsetMs=0
@@ -50,7 +51,9 @@ class TestParseJson3:
         # Sixth word: "test" at tStartMs=4000 + tOffsetMs=600
         assert words[5].word == "test"
         assert words[5].start_ms == 4600
-        assert words[5].end_ms == 6000  # 4000 + 2000
+        # Last word: avg word duration = (600-0)/2 = 300ms, * 1.2 = 360ms
+        # 4600 + 360 = 4960, capped at event end 6000
+        assert words[5].end_ms == 4960
         assert words[5].confidence == 250
 
     def test_parse_json3_no_offsets(self, sample_json3_no_offsets):
@@ -178,7 +181,7 @@ class TestLocatePhrase:
 
         assert result is not None
         assert result.start_ms == 2000   # "this" start
-        assert result.end_ms == 6000     # "test" end
+        assert result.end_ms == 4960    # "test" end (tighter last-word estimate)
         assert result.confidence == (190 + 210 + 220 + 250) / 4
 
     def test_locate_phrase_single_word(self, sample_json3):
@@ -188,5 +191,5 @@ class TestLocatePhrase:
 
         assert result is not None
         assert result.start_ms == 4600
-        assert result.end_ms == 6000
+        assert result.end_ms == 4960  # tighter last-word estimate
         assert result.confidence == 250.0

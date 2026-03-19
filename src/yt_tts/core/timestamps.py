@@ -41,7 +41,17 @@ def parse_json3(data: dict) -> list[WordTimestamp]:
             if i + 1 < len(seg_entries):
                 end_ms = seg_entries[i + 1][1]
             else:
-                end_ms = t_start_ms + d_duration_ms
+                # Last word: estimate end from average word duration in this event,
+                # capped at event end. Don't use full event duration — it includes
+                # silence/pause after the last word.
+                event_end_ms = t_start_ms + d_duration_ms
+                if len(seg_entries) > 1:
+                    # Average ms per word from all previous words
+                    first_start = seg_entries[0][1]
+                    avg_word_ms = (start_ms - first_start) / (len(seg_entries) - 1)
+                    end_ms = min(event_end_ms, start_ms + int(avg_word_ms * 1.2))
+                else:
+                    end_ms = event_end_ms
             words.append(
                 WordTimestamp(
                     word=text,
