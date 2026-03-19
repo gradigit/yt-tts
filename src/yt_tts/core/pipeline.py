@@ -209,6 +209,7 @@ def _build_resolve_fn(config: Config):
             # Fallback to segment-level timestamps (also hits timedtext API)
             timestamp_source = "segment"
             segments = None
+            seg_range = None
 
             try:
                 segments = fetch_transcript(video_id)
@@ -230,10 +231,35 @@ def _build_resolve_fn(config: Config):
                     logger.debug("yt-dlp transcript also failed for %s: %s", video_id, e)
 
             if segments is not None:
-                time_range = _locate_phrase_in_segments(phrase, segments)
+                seg_range = _locate_phrase_in_segments(phrase, segments)
+                if seg_range is not None and seg_range.confidence < 1.0:
+                    # Segment-level timestamps are too coarse (2-5s segments).
+                    # Use them as an estimate for forced alignment instead of
+                    # extracting directly — this gives ~30ms word boundaries.
+                    logger.debug(
+                        "Segment timestamps found (%d-%dms), refining with alignment",
+                        seg_range.start_ms, seg_range.end_ms,
+                    )
+                    # Will fall through to the alignment path below
+                elif seg_range is not None:
+                    time_range = seg_range
 
         # Local alignment — runs when caption APIs are dead OR didn't find timestamps
-        # Uses CTC forced alignment with known text (from index) when available
+        # Also refines segment-level timestamps that are too coarse
+        # Use segment range as alignment estimate if no index context available
+        if time_range is None and not result.context_text and seg_range is not None:
+            try:
+                from yt_tts.core.align import transcribe_and_locate
+                time_range = transcribe_and_locate(
+                    video_id, phrase,
+                    seg_range.start_ms, seg_range.end_ms,
+                    config=config, known_text=None,
+                )
+                if time_range is not None:
+                    timestamp_source = "aligned"
+            except Exception as e:
+                logger.debug("Segment-to-alignment fallback failed: %s", e)
+
         if time_range is None and result.context_text:
             timestamp_source = "aligned"
             est = _estimate_from_index_text(phrase, video_id, result, config)
