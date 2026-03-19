@@ -23,7 +23,6 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
-tests/
 
 # Data
 *.db

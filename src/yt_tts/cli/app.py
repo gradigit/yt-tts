@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     # Detect subcommand vs synthesis mode.
     # If first arg is a known subcommand, route to it.
     # Otherwise, treat everything as synthesis.
-    subcommands = {"index", "cache", "batch"}
+    subcommands = {"index", "cache", "batch", "validate"}
     command = args[0] if args else None
 
     if command == "--help" or command == "-h" or not args:
@@ -81,6 +81,7 @@ Usage:
   yt-tts batch phrases.txt -o clips/       Batch generate clips
   yt-tts cache stats                      Show cache statistics
   yt-tts cache clear                      Clear all caches
+  yt-tts validate FILE --text "words"     Validate synthesized audio quality
 
 Synthesis options:
   --video URL          Use a specific video (bypass index)
@@ -112,6 +113,8 @@ def _dispatch_subcommand(args: list[str]) -> int:
         return _dispatch_cache(rest)
     elif command == "batch":
         return _dispatch_batch(rest)
+    elif command == "validate":
+        return _dispatch_validate(rest)
     return 1
 
 
@@ -264,6 +267,103 @@ Options:
         logging.getLogger("yt_tts").setLevel(logging.DEBUG)
 
     return run_batch(a)
+
+
+def _dispatch_validate(args: list[str]) -> int:
+    if not args or args[0] in ("-h", "--help"):
+        print("""Usage: yt-tts validate FILE [options]
+
+  Analyze a synthesized audio file for quality issues.
+
+Options:
+  --text TEXT           Original text (for duration analysis)
+  --json               Output results as JSON
+  --verbose            Debug logging""")
+        return 0
+
+    audio_file = None
+    text = None
+    json_output = False
+    verbose = False
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--text" and i + 1 < len(args):
+            text = args[i + 1]
+            i += 2
+        elif arg == "--json":
+            json_output = True
+            i += 1
+        elif arg == "--verbose":
+            verbose = True
+            i += 1
+        elif not arg.startswith("-") and audio_file is None:
+            audio_file = arg
+            i += 1
+        else:
+            i += 1
+
+    if not audio_file:
+        print("Error: audio file required", file=sys.stderr)
+        print("Usage: yt-tts validate FILE [--text TEXT]", file=sys.stderr)
+        return 1
+
+    if verbose:
+        logging.basicConfig(
+            level=logging.WARNING,
+            format="%(name)s: %(message)s",
+            stream=sys.stderr,
+        )
+        logging.getLogger("yt_tts").setLevel(logging.DEBUG)
+
+    from yt_tts.core.validate import validate_clip, validate_synthesis
+
+    if text:
+        result = validate_synthesis(audio_file, text)
+        report = result["report"]
+    else:
+        report_obj = validate_clip(audio_file)
+        report = {
+            "duration_s": report_obj.duration_s,
+            "expected_duration_s": report_obj.expected_duration_s,
+            "duration_ratio": report_obj.duration_ratio,
+            "silence_gaps": report_obj.silence_gaps,
+            "total_silence_s": report_obj.total_silence_s,
+            "boundary_start_rms": report_obj.boundary_start_rms,
+            "boundary_end_rms": report_obj.boundary_end_rms,
+            "volume_jumps": report_obj.volume_jumps,
+            "spectral_jumps": report_obj.spectral_jumps,
+            "voiced_ratio": report_obj.voiced_ratio,
+            "issues": report_obj.issues,
+        }
+        result = {"report": report}
+
+    if json_output:
+        import json
+
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"Duration: {report['duration_s']:.3f}s")
+        if report["expected_duration_s"] > 0:
+            print(
+                f"Expected: {report['expected_duration_s']:.3f}s "
+                f"(ratio: {report['duration_ratio']:.2f}x)"
+            )
+        print(f"Voiced ratio: {report['voiced_ratio']:.2%}")
+        print(f"Silence gaps: {len(report['silence_gaps'])}")
+        if report["total_silence_s"] > 0:
+            print(f"Total silence: {report['total_silence_s']:.3f}s")
+        print(f"Volume jumps: {len(report['volume_jumps'])}")
+        print(f"Spectral jumps: {len(report['spectral_jumps'])}")
+        if report["issues"]:
+            print(f"\nIssues ({len(report['issues'])}):")
+            for issue in report["issues"]:
+                print(f"  - {issue}")
+        else:
+            print("\nNo issues detected.")
+
+    return 1 if report["issues"] else 0
 
 
 def _dispatch_synthesize(args: list[str]) -> int:

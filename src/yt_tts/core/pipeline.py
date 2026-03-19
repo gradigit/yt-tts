@@ -205,6 +205,19 @@ def _build_resolve_fn(config: Config):
             word_timestamps = parse_json3(json3_data)
             time_range = locate_phrase(phrase, word_timestamps, config.min_confidence)
 
+            # Sanity check: if json3 range is too wide for the phrase, refine
+            if time_range is not None:
+                phrase_words = len(phrase.split())
+                expected_ms = phrase_words * 400 + 200  # ~0.4s/word + 0.2s buffer
+                actual_ms = time_range.end_ms - time_range.start_ms
+                if actual_ms > expected_ms * 2.5:
+                    logger.debug(
+                        "json3 range too wide (%dms for %d words, expected ~%dms), will refine",
+                        actual_ms, phrase_words, expected_ms,
+                    )
+                    # Keep as estimate, fall through to alignment
+                    time_range = None
+
         if time_range is None and not caption_api_dead:
             # Fallback to segment-level timestamps (also hits timedtext API)
             timestamp_source = "segment"
