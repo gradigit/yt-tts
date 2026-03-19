@@ -129,17 +129,17 @@ def extract_clip(
     Raises:
         ClipExtractionError: on any unrecoverable failure.
     """
-    # 1. Cache check
-    if cache is not None:
-        cached = cache.get(video_id, start_ms, end_ms)
-        if cached is not None:
-            logger.debug("Cache hit: %s", cached)
-            return cached
-
     # Compute timing with padding (respects tightness setting)
     padding_ms = _resolve_padding(config)
     padded_start_ms = max(0, start_ms - padding_ms)
     padded_end_ms = end_ms + padding_ms
+
+    # 1. Cache check (keyed on padded boundaries so tightness changes bust cache)
+    if cache is not None:
+        cached = cache.get(video_id, padded_start_ms, padded_end_ms)
+        if cached is not None:
+            logger.debug("Cache hit: %s", cached)
+            return cached
     duration_ms = padded_end_ms - padded_start_ms
 
     start_s = padded_start_ms / 1000.0
@@ -197,6 +197,6 @@ def extract_clip(
 
     # 6. Cache and return
     if cache is not None:
-        return cache.put(video_id, start_ms, end_ms, output_path)
+        return cache.put(video_id, padded_start_ms, padded_end_ms, output_path)
 
     return output_path

@@ -1,0 +1,1624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>yt-tts -- the voice of the internet</title>
+<meta name="description" content="Turn any text into audio by stitching YouTube clips where those words are spoken. Like Bumblebee speaking through radio clips.">
+<meta property="og:title" content="yt-tts -- the voice of the internet">
+<meta property="og:description" content="Type any sentence. Hear it spoken by the internet itself. Every word stitched from a different YouTube video.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://github.com/gradigit/yt-tts">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300;1,9..40,400&family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+/* ================================================================
+   DESIGN TOKENS
+   ================================================================ */
+:root {
+  /* Surfaces */
+  --void: #060606;
+  --ground: #0a0a0a;
+  --surface-1: #111110;
+  --surface-2: #1a1917;
+  --surface-3: #222120;
+
+  /* Text */
+  --text-primary: #e8e0d4;
+  --text-secondary: rgba(232, 224, 212, 0.65);
+  --text-tertiary: rgba(232, 224, 212, 0.55);
+  --text-muted: rgba(232, 224, 212, 0.2);
+
+  /* Accent: warm amber family */
+  --amber: #d4a574;
+  --amber-dim: rgba(212, 165, 116, 0.15);
+  --amber-glow: rgba(212, 165, 116, 0.08);
+  --coral: #c27a54;
+  --gold: #e0c090;
+
+  /* Borders */
+  --border: rgba(212, 165, 116, 0.08);
+  --border-emphasis: rgba(212, 165, 116, 0.18);
+
+  /* Typography */
+  --font-display: 'Instrument Serif', Georgia, serif;
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'DM Mono', 'SF Mono', monospace;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 40px;
+  --space-2xl: 64px;
+  --space-3xl: 96px;
+  --space-4xl: 140px;
+}
+
+/* ================================================================
+   RESET & BASE
+   ================================================================ */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--text-primary);
+  background: var(--ground);
+  overflow-x: hidden;
+}
+
+::selection {
+  background: rgba(212, 165, 116, 0.25);
+  color: var(--text-primary);
+}
+
+/* Subtle noise texture overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* ================================================================
+   NAVIGATION
+   ================================================================ */
+.nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: var(--space-md) var(--space-lg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: background 0.4s ease, backdrop-filter 0.4s ease;
+}
+
+.nav.scrolled {
+  background: rgba(6, 6, 6, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-logo {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--amber);
+  letter-spacing: 0.05em;
+  text-decoration: none;
+}
+
+.nav-links {
+  display: flex;
+  gap: var(--space-lg);
+  list-style: none;
+}
+
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  text-decoration: none;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: color 0.25s ease;
+}
+
+.nav-links a:hover {
+  color: var(--amber);
+}
+
+@media (max-width: 640px) {
+  .nav-links { display: none; }
+}
+
+/* ================================================================
+   HERO SECTION
+   ================================================================ */
+.hero {
+  position: relative;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
+.hero-shader {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border: none;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.hero-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    to bottom,
+    rgba(6, 6, 6, 0.3) 0%,
+    rgba(6, 6, 6, 0.1) 30%,
+    rgba(6, 6, 6, 0.1) 60%,
+    rgba(6, 6, 6, 0.7) 90%,
+    var(--ground) 100%
+  );
+  pointer-events: none;
+}
+
+.hero-content {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  padding: 0 var(--space-lg);
+  max-width: 800px;
+}
+
+.hero-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--amber);
+  opacity: 0.6;
+  margin-bottom: var(--space-lg);
+}
+
+.hero-title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(48px, 10vw, 96px);
+  line-height: 0.95;
+  color: var(--text-primary);
+  margin-bottom: var(--space-xl);
+  letter-spacing: -0.02em;
+  text-shadow: 0 2px 40px rgba(0, 0, 0, 0.5);
+}
+
+.hero-title em {
+  font-style: italic;
+  color: var(--amber);
+}
+
+.hero-subtitle {
+  font-family: var(--font-body);
+  font-weight: 300;
+  font-size: clamp(16px, 2.5vw, 20px);
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 520px;
+  margin: 0 auto var(--space-xl);
+}
+
+.hero-listen {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 12px 28px;
+  background: transparent;
+  border: 1px solid var(--border-emphasis);
+  border-radius: 100px;
+  color: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.hero-listen:hover {
+  background: var(--amber-dim);
+  border-color: var(--amber);
+}
+
+.hero-listen:active {
+  transform: scale(0.97);
+}
+
+.hero-listen .play-icon {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.hero-scroll {
+  position: absolute;
+  bottom: var(--space-xl);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  animation: pulseDown 2.5s ease-in-out infinite;
+}
+
+.hero-scroll .scroll-line {
+  width: 1px;
+  height: 32px;
+  background: linear-gradient(to bottom, var(--text-muted), transparent);
+}
+
+@keyframes pulseDown {
+  0%, 100% { opacity: 0.3; transform: translateX(-50%) translateY(0); }
+  50% { opacity: 0.6; transform: translateX(-50%) translateY(4px); }
+}
+
+/* ================================================================
+   SECTION BASE
+   ================================================================ */
+.section {
+  position: relative;
+  padding: var(--space-4xl) var(--space-lg);
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.section-label::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+  opacity: 0.5;
+}
+
+.section-heading {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(32px, 5vw, 52px);
+  line-height: 1.1;
+  color: var(--text-primary);
+  margin-bottom: var(--space-lg);
+  letter-spacing: -0.015em;
+}
+
+.section-body {
+  font-weight: 300;
+  font-size: 17px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  max-width: 65ch;
+}
+
+/* ================================================================
+   WHAT IT IS -- BUMBLEBEE SECTION
+   ================================================================ */
+.what-it-is {
+  padding-bottom: var(--space-3xl);
+}
+
+.what-it-is::before {
+  content: '';
+  position: absolute;
+  top: -100px;
+  right: -200px;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, var(--amber-glow) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.bumblebee-text {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: clamp(22px, 3.5vw, 30px);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-width: 600px;
+  margin-bottom: var(--space-2xl);
+}
+
+.bumblebee-text strong {
+  color: var(--amber);
+  font-weight: 400;
+}
+
+/* Stats row */
+.stats-row {
+  display: flex;
+  gap: var(--space-xl);
+  margin-top: var(--space-2xl);
+  flex-wrap: wrap;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-value {
+  font-family: var(--font-mono);
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--amber);
+  letter-spacing: -0.02em;
+}
+
+.stat-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.05em;
+}
+
+/* Pipeline visualization */
+.pipeline {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+  margin-top: var(--space-2xl);
+  padding: var(--space-xl) 0;
+}
+
+.pipeline-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  position: relative;
+}
+
+.pipeline-step-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.pipeline-step-desc {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-align: center;
+  max-width: 100px;
+}
+
+.pipeline-arrow {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  flex-shrink: 0;
+  padding: 0 2px;
+}
+
+@media (max-width: 768px) {
+  .pipeline {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-xs);
+  }
+  .pipeline-arrow {
+    transform: rotate(90deg);
+    padding: var(--space-xs) 0;
+  }
+  .pipeline-step {
+    flex-direction: row;
+    padding: var(--space-sm) 0;
+    gap: var(--space-md);
+  }
+  .pipeline-step-desc {
+    text-align: left;
+    max-width: none;
+  }
+}
+
+/* ================================================================
+   HOW IT SOUNDS -- DEMO SECTION
+   ================================================================ */
+.demo-section {
+  position: relative;
+  padding: var(--space-4xl) 0;
+  overflow: hidden;
+}
+
+.demo-section .shader-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border: none;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.3;
+}
+
+.demo-section .demo-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    to bottom,
+    var(--ground) 0%,
+    rgba(10, 10, 10, 0.5) 15%,
+    rgba(10, 10, 10, 0.5) 85%,
+    var(--ground) 100%
+  );
+  pointer-events: none;
+}
+
+.demo-content {
+  position: relative;
+  z-index: 2;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 var(--space-lg);
+}
+
+/* Audio Player */
+.player {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: var(--space-xl) var(--space-xl);
+  margin-top: var(--space-2xl);
+  max-width: 640px;
+}
+
+.player-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-md);
+}
+
+.player-phrase {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 22px;
+  color: var(--text-primary);
+  margin-bottom: var(--space-lg);
+  line-height: 1.4;
+}
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.player-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border-emphasis);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  flex-shrink: 0;
+}
+
+.player-btn:hover {
+  background: var(--amber-dim);
+  border-color: var(--amber);
+}
+
+.player-btn:active {
+  transform: scale(0.95);
+}
+
+.player-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: var(--amber);
+}
+
+.player-progress {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.player-bar-wrap {
+  width: 100%;
+  height: 4px;
+  background: rgba(212, 165, 116, 0.08);
+  border-radius: 2px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.player-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--amber);
+  border-radius: 2px;
+  transition: width 0.1s linear;
+}
+
+.player-time {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.05em;
+}
+
+/* Word tracker */
+.word-tracker {
+  margin-top: var(--space-xl);
+  min-height: 80px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+  align-content: flex-start;
+}
+
+.word-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  transition: all 0.3s ease;
+}
+
+.word-chip.active {
+  color: var(--amber);
+  background: var(--amber-dim);
+  border-color: var(--border-emphasis);
+}
+
+.word-chip.played {
+  color: var(--text-secondary);
+}
+
+/* Demo clips grid */
+.demo-clips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-md);
+  margin-top: var(--space-2xl);
+}
+
+.demo-clip {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: var(--space-lg);
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.demo-clip:hover {
+  border-color: var(--border-emphasis);
+  background: var(--surface-2);
+}
+
+.demo-clip:active {
+  transform: scale(0.98);
+}
+
+.demo-clip-phrase {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 16px;
+  color: var(--text-primary);
+  margin-bottom: var(--space-sm);
+}
+
+.demo-clip-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.demo-clip.playing {
+  border-color: var(--amber);
+  background: var(--amber-dim);
+}
+
+/* Waveform visualizer */
+.waveform-vis {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+  margin-left: var(--space-sm);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.waveform-vis.active {
+  opacity: 1;
+}
+
+.waveform-vis .bar {
+  width: 3px;
+  background: var(--amber);
+  border-radius: 1.5px;
+  height: 4px;
+  animation: waveBar 0.8s ease-in-out infinite alternate;
+}
+
+.waveform-vis .bar:nth-child(1) { animation-delay: 0ms; }
+.waveform-vis .bar:nth-child(2) { animation-delay: 120ms; }
+.waveform-vis .bar:nth-child(3) { animation-delay: 240ms; }
+.waveform-vis .bar:nth-child(4) { animation-delay: 360ms; }
+.waveform-vis .bar:nth-child(5) { animation-delay: 200ms; }
+
+@keyframes waveBar {
+  0% { height: 4px; }
+  100% { height: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waveform-vis .bar {
+    animation: none;
+    height: 12px;
+  }
+}
+
+/* ================================================================
+   FOR AGENTS SECTION
+   ================================================================ */
+.agents-section {
+  padding-bottom: var(--space-3xl);
+}
+
+.agents-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-xl);
+  margin-top: var(--space-2xl);
+}
+
+@media (max-width: 768px) {
+  .agents-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.agent-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: var(--space-xl);
+}
+
+.agent-card-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-md);
+}
+
+.code-block {
+  background: var(--void);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: var(--space-md) var(--space-lg);
+  overflow-x: auto;
+}
+
+.code-block pre {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  white-space: pre;
+  margin: 0;
+}
+
+.code-block pre .kw { color: var(--coral); }
+.code-block pre .str { color: var(--amber); }
+.code-block pre .num { color: var(--gold); }
+.code-block pre .key { color: var(--text-secondary); }
+.code-block pre .comment { color: var(--text-tertiary); font-style: italic; }
+
+/* ================================================================
+   INSTALL SECTION
+   ================================================================ */
+.install-section {
+  position: relative;
+  padding: var(--space-4xl) 0;
+  overflow: hidden;
+}
+
+.install-section .shader-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border: none;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.15;
+}
+
+.install-section .install-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    to bottom,
+    var(--ground) 0%,
+    rgba(10, 10, 10, 0.6) 20%,
+    rgba(10, 10, 10, 0.6) 80%,
+    var(--ground) 100%
+  );
+  pointer-events: none;
+}
+
+.install-content {
+  position: relative;
+  z-index: 2;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 0 var(--space-lg);
+  text-align: center;
+}
+
+.install-heading {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(36px, 6vw, 56px);
+  line-height: 1.1;
+  color: var(--text-primary);
+  margin-bottom: var(--space-md);
+  letter-spacing: -0.015em;
+}
+
+.install-sub {
+  font-weight: 300;
+  font-size: 18px;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2xl);
+  max-width: 500px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.install-cmd {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-md);
+  background: var(--surface-1);
+  border: 1px solid var(--border-emphasis);
+  border-radius: 12px;
+  padding: var(--space-md) var(--space-xl);
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.install-cmd code {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--amber);
+  white-space: nowrap;
+}
+
+.install-cmd .copy-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: all 0.25s ease;
+  flex-shrink: 0;
+}
+
+.install-cmd .copy-btn:hover {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+
+.install-then {
+  margin-top: var(--space-xl);
+}
+
+.install-then p {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-md);
+}
+
+.install-then code {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+/* ================================================================
+   VOICES SECTION (PROSE)
+   ================================================================ */
+.voices-section {
+  padding: var(--space-4xl) var(--space-lg);
+  max-width: 700px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.voices-quote {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: clamp(20px, 3vw, 28px);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-xl);
+}
+
+.voices-quote strong {
+  color: var(--amber);
+  font-weight: 400;
+}
+
+.voices-attribution {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* ================================================================
+   FOOTER
+   ================================================================ */
+.footer {
+  padding: var(--space-2xl) var(--space-lg);
+  border-top: 1px solid var(--border);
+  max-width: 1100px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+
+.footer-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.footer-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--amber);
+  letter-spacing: 0.05em;
+}
+
+.footer-license {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.05em;
+}
+
+.footer-links {
+  display: flex;
+  gap: var(--space-lg);
+}
+
+.footer-links a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-decoration: none;
+  letter-spacing: 0.05em;
+  transition: color 0.25s ease;
+}
+
+.footer-links a:hover {
+  color: var(--amber);
+}
+
+/* ================================================================
+   SCROLL ANIMATIONS
+   ================================================================ */
+.fade-in {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.7s ease, transform 0.7s ease;
+}
+
+.fade-in.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Stagger children */
+.stagger > :nth-child(1) { transition-delay: 0ms; }
+.stagger > :nth-child(2) { transition-delay: 60ms; }
+.stagger > :nth-child(3) { transition-delay: 120ms; }
+.stagger > :nth-child(4) { transition-delay: 180ms; }
+.stagger > :nth-child(5) { transition-delay: 240ms; }
+.stagger > :nth-child(6) { transition-delay: 300ms; }
+.stagger > :nth-child(7) { transition-delay: 360ms; }
+.stagger > :nth-child(8) { transition-delay: 420ms; }
+.stagger > :nth-child(9) { transition-delay: 480ms; }
+.stagger > :nth-child(10) { transition-delay: 540ms; }
+.stagger > :nth-child(11) { transition-delay: 600ms; }
+.stagger > :nth-child(12) { transition-delay: 660ms; }
+.stagger > :nth-child(13) { transition-delay: 720ms; }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .fade-in {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .hero-scroll {
+    animation: none;
+    opacity: 0.3;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Focus styles for accessibility */
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ================================================================
+   WAVEFORM DIVIDER
+   ================================================================ */
+.waveform-divider {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 var(--space-lg);
+  height: 1px;
+  position: relative;
+}
+
+.waveform-divider::after {
+  content: '';
+  display: block;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    var(--border-emphasis) 20%,
+    var(--amber) 50%,
+    var(--border-emphasis) 80%,
+    transparent 100%
+  );
+  opacity: 0.3;
+}
+
+/* ================================================================
+   RESPONSIVE
+   ================================================================ */
+@media (max-width: 640px) {
+  .section {
+    padding: var(--space-3xl) var(--space-md);
+  }
+  .player {
+    padding: var(--space-lg);
+  }
+  .agents-grid {
+    grid-template-columns: 1fr;
+  }
+  .install-cmd {
+    padding: var(--space-md);
+  }
+  .footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     NAVIGATION
+     ============================================================ -->
+<nav class="nav" id="nav" role="navigation" aria-label="Main navigation">
+  <a href="#" class="nav-logo">yt-tts</a>
+  <ul class="nav-links">
+    <li><a href="#what">About</a></li>
+    <li><a href="#demo">Listen</a></li>
+    <li><a href="#agents">Agents</a></li>
+    <li><a href="#install">Install</a></li>
+    <li><a href="https://github.com/gradigit/yt-tts" target="_blank" rel="noopener">GitHub</a></li>
+  </ul>
+</nav>
+
+<main>
+<!-- ============================================================
+     HERO
+     ============================================================ -->
+<section class="hero" id="hero">
+  <iframe class="hero-shader" src="flow-field.html" title="Generative flow field background" loading="lazy" aria-hidden="true" tabindex="-1" sandbox="allow-scripts"></iframe>
+  <div class="hero-overlay"></div>
+
+  <div class="hero-content">
+    <div class="hero-label fade-in">Open source</div>
+    <h1 class="hero-title fade-in">The <em>voice</em> of<br>the internet</h1>
+    <p class="hero-subtitle fade-in">Type any sentence. Hear it spoken by the internet itself -- every word stitched from a different YouTube video.</p>
+    <button class="hero-listen fade-in" id="heroPlayBtn" aria-label="Play demo audio">
+      <svg class="play-icon" viewBox="0 0 16 16"><polygon points="3,1 13,8 3,15"/></svg>
+      Listen
+    </button>
+  </div>
+
+  <div class="hero-scroll" aria-hidden="true">
+    <div class="scroll-line"></div>
+  </div>
+</section>
+
+<!-- ============================================================
+     WHAT IT IS
+     ============================================================ -->
+<section class="section what-it-is" id="what">
+  <div class="section-label fade-in">What it is</div>
+  <h2 class="section-heading fade-in">Text in, <em style="font-family:var(--font-display);font-style:italic;color:var(--amber)">voices</em> out</h2>
+
+  <div class="bumblebee-text fade-in">
+    Like <strong>Bumblebee</strong> speaking through radio clips -- yt-tts searches millions of YouTube transcripts, finds exactly where your words are spoken, extracts the audio with 30ms precision, and stitches it all together.
+  </div>
+
+  <p class="section-body fade-in">
+    No API keys. No cloud services. No synthetic voices. Every word comes from a real human who recorded themselves on YouTube. The result is imperfect, textured, and alive.
+  </p>
+
+  <div class="stats-row fade-in">
+    <div class="stat">
+      <span class="stat-value">3.15M</span>
+      <span class="stat-label">Transcripts indexed</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value">~30ms</span>
+      <span class="stat-label">Alignment precision</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value">100%</span>
+      <span class="stat-label">Local processing</span>
+    </div>
+  </div>
+
+  <div class="pipeline stagger" role="list" aria-label="Processing pipeline">
+    <div class="pipeline-step fade-in" role="listitem">
+      <span class="pipeline-step-name">Text</span>
+      <span class="pipeline-step-desc">Your sentence</span>
+    </div>
+    <span class="pipeline-arrow fade-in" aria-hidden="true">&rarr;</span>
+    <div class="pipeline-step fade-in" role="listitem">
+      <span class="pipeline-step-name">Search</span>
+      <span class="pipeline-step-desc">3.15M transcripts</span>
+    </div>
+    <span class="pipeline-arrow fade-in" aria-hidden="true">&rarr;</span>
+    <div class="pipeline-step fade-in" role="listitem">
+      <span class="pipeline-step-name">Align</span>
+      <span class="pipeline-step-desc">CTC forced alignment</span>
+    </div>
+    <span class="pipeline-arrow fade-in" aria-hidden="true">&rarr;</span>
+    <div class="pipeline-step fade-in" role="listitem">
+      <span class="pipeline-step-name">Extract</span>
+      <span class="pipeline-step-desc">Precise clip cut</span>
+    </div>
+    <span class="pipeline-arrow fade-in" aria-hidden="true">&rarr;</span>
+    <div class="pipeline-step fade-in" role="listitem">
+      <span class="pipeline-step-name">Verify</span>
+      <span class="pipeline-step-desc">ASR confirmation</span>
+    </div>
+    <span class="pipeline-arrow fade-in" aria-hidden="true">&rarr;</span>
+    <div class="pipeline-step fade-in" role="listitem">
+      <span class="pipeline-step-name">Stitch</span>
+      <span class="pipeline-step-desc">Crossfade + normalize</span>
+    </div>
+    <span class="pipeline-arrow fade-in" aria-hidden="true">&rarr;</span>
+    <div class="pipeline-step fade-in" role="listitem">
+      <span class="pipeline-step-name">Audio</span>
+      <span class="pipeline-step-desc">MP3 / WAV</span>
+    </div>
+  </div>
+</section>
+
+<div class="waveform-divider"></div>
+
+<!-- ============================================================
+     DEMO / LISTEN SECTION
+     ============================================================ -->
+<section class="demo-section" id="demo">
+  <iframe class="shader-bg" src="resonant-strings.html" title="Generative resonant strings background" loading="lazy" aria-hidden="true" tabindex="-1" sandbox="allow-scripts"></iframe>
+  <div class="demo-overlay"></div>
+
+  <div class="demo-content">
+    <div class="section-label fade-in">Listen</div>
+    <h2 class="section-heading fade-in">Hear the collective voice</h2>
+    <p class="section-body fade-in">
+      Every clip below was synthesized by yt-tts. Each word was sourced from a different YouTube video, cut to precise boundaries, and stitched together. Press play.
+    </p>
+
+    <!-- Main player -->
+    <div class="player fade-in" id="mainPlayer">
+      <div class="player-label">Featured demo</div>
+      <div class="player-phrase">"The voice of the internet belongs to all of us"</div>
+      <div class="player-controls">
+        <button class="player-btn" id="mainPlayBtn" aria-label="Play or pause demo audio">
+          <svg viewBox="0 0 16 16" id="mainPlayIcon"><polygon points="3,1 13,8 3,15"/></svg>
+        </button>
+        <div class="waveform-vis" id="waveformVis">
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+        </div>
+        <div class="player-progress">
+          <div class="player-bar-wrap" id="mainBarWrap">
+            <div class="player-bar" id="mainBar"></div>
+          </div>
+          <div class="player-time">
+            <span id="mainTimeCurrent">0:00</span>
+            <span id="mainTimeDuration">--:--</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="word-tracker" id="wordTracker" aria-label="Words being spoken">
+        <!-- Words injected by JS -->
+      </div>
+    </div>
+
+    <!-- Additional demo clips -->
+    <div class="demo-clips stagger" id="demoClips">
+      <div class="demo-clip fade-in" data-src="demo_speech_v2.mp3" data-phrase="We were never meant to have our own voices...">
+        <div class="demo-clip-phrase">"We were never meant to have our own voices..."</div>
+        <div class="demo-clip-meta">Full speech -- 3:42</div>
+      </div>
+      <div class="demo-clip fade-in" style="opacity: 0.4; cursor: default;">
+        <div class="demo-clip-phrase">"Good morning everyone, how are you doing today?"</div>
+        <div class="demo-clip-meta">Coming soon</div>
+      </div>
+      <div class="demo-clip fade-in" style="opacity: 0.4; cursor: default;">
+        <div class="demo-clip-phrase">"Never gonna give you up"</div>
+        <div class="demo-clip-meta">Coming soon</div>
+      </div>
+      <div class="demo-clip fade-in" style="opacity: 0.4; cursor: default;">
+        <div class="demo-clip-phrase">"What does it mean to be alive?"</div>
+        <div class="demo-clip-meta">Coming soon</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="waveform-divider"></div>
+
+<!-- ============================================================
+     FOR AGENTS
+     ============================================================ -->
+<section class="section agents-section" id="agents">
+  <div class="section-label fade-in">For agents</div>
+  <h2 class="section-heading fade-in">Give your agent a voice</h2>
+  <p class="section-body fade-in">
+    The installer sets up a skill for Claude Code, Codex CLI, and any agent that reads from standard skill directories. Agents call yt-tts with <code style="font-family:var(--font-mono);font-size:14px;color:var(--amber);background:var(--surface-2);padding:2px 8px;border-radius:4px">--json</code> for structured output.
+  </p>
+
+  <div class="agents-grid">
+    <div class="agent-card fade-in">
+      <div class="agent-card-label">Agent invocation</div>
+      <div class="code-block">
+<pre><span class="comment"># Agents call yt-tts with --json</span>
+<span class="kw">yt-tts</span> <span class="str">--json</span> <span class="str">"hello world"</span></pre>
+      </div>
+    </div>
+
+    <div class="agent-card fade-in">
+      <div class="agent-card-label">Structured output</div>
+      <div class="code-block">
+<pre>{
+  <span class="key">"output_path"</span>: <span class="str">"yt-tts-a1b2c3d4.mp3"</span>,
+  <span class="key">"duration_ms"</span>: <span class="num">3200</span>,
+  <span class="key">"clips"</span>: [
+    {
+      <span class="key">"video_id"</span>: <span class="str">"dQw4w9WgXcQ"</span>,
+      <span class="key">"phrase"</span>: <span class="str">"hello world"</span>,
+      <span class="key">"confidence"</span>: <span class="num">0.84</span>
+    }
+  ],
+  <span class="key">"missing_words"</span>: [],
+  <span class="key">"exit_code"</span>: <span class="num">0</span>
+}</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="waveform-divider"></div>
+
+<!-- ============================================================
+     VOICES INTERLUDE
+     ============================================================ -->
+<section class="voices-section">
+  <p class="voices-quote fade-in">
+    "Every word you have ever spoken online is now part of something larger than yourself. Your <strong>voice lives in a library</strong> that spans the entire world."
+  </p>
+  <div class="voices-attribution fade-in">From the yt-tts manifesto</div>
+</section>
+
+<div class="waveform-divider"></div>
+
+<!-- ============================================================
+     INSTALL
+     ============================================================ -->
+<section class="install-section" id="install">
+  <iframe class="shader-bg" src="murmuration.html" title="Generative murmuration background" loading="lazy" aria-hidden="true" tabindex="-1" sandbox="allow-scripts"></iframe>
+  <div class="install-overlay"></div>
+
+  <div class="install-content">
+    <div class="section-label fade-in" style="justify-content:center">Install</div>
+    <h2 class="install-heading fade-in">One command</h2>
+    <p class="install-sub fade-in">Installs everything: uv, ffmpeg, yt-dlp, the CLI, agent skills, and a starter transcript index.</p>
+
+    <div class="install-cmd fade-in">
+      <code id="installCode">curl -LsSf https://raw.githubusercontent.com/gradigit/yt-tts/master/install.sh | sh</code>
+      <button class="copy-btn" id="copyBtn" aria-label="Copy install command">Copy</button>
+    </div>
+
+    <div class="install-then fade-in">
+      <p>Then:</p>
+      <code>yt-tts "the meaning of life"</code>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     FOOTER
+     ============================================================ -->
+</main>
+<footer class="footer">
+  <div class="footer-left">
+    <span class="footer-name">yt-tts</span>
+    <span class="footer-license">MIT License</span>
+  </div>
+  <div class="footer-links">
+    <a href="https://github.com/gradigit/yt-tts" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/gradigit/yt-tts/issues" target="_blank" rel="noopener">Issues</a>
+    <a href="https://github.com/pbakaus/radiant" target="_blank" rel="noopener">Shaders by Radiant</a>
+  </div>
+</footer>
+
+<!-- ============================================================
+     JAVASCRIPT
+     ============================================================ -->
+<script>
+(function() {
+  'use strict';
+
+  // ─── NAV SCROLL ───
+  var nav = document.getElementById('nav');
+  var scrolled = false;
+
+  function checkScroll() {
+    var s = window.scrollY > 60;
+    if (s !== scrolled) {
+      scrolled = s;
+      nav.classList.toggle('scrolled', s);
+    }
+  }
+
+  window.addEventListener('scroll', checkScroll, { passive: true });
+  checkScroll();
+
+  // ─── SCROLL ANIMATIONS ───
+  var fadeEls = document.querySelectorAll('.fade-in');
+
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, {
+    threshold: 0.1,
+    rootMargin: '0px 0px -40px 0px'
+  });
+
+  fadeEls.forEach(function(el) {
+    observer.observe(el);
+  });
+
+  // ─── AUDIO PLAYER ───
+  var mainAudio = new Audio('demo_speech_v2.mp3');
+  mainAudio.preload = 'metadata';
+
+  var mainPlayBtn = document.getElementById('mainPlayBtn');
+  var mainPlayIcon = document.getElementById('mainPlayIcon');
+  var mainBar = document.getElementById('mainBar');
+  var mainBarWrap = document.getElementById('mainBarWrap');
+  var mainTimeCurrent = document.getElementById('mainTimeCurrent');
+  var mainTimeDuration = document.getElementById('mainTimeDuration');
+  var heroPlayBtn = document.getElementById('heroPlayBtn');
+  var isPlaying = false;
+
+  function formatTime(s) {
+    if (isNaN(s) || !isFinite(s)) return '--:--';
+    var m = Math.floor(s / 60);
+    var sec = Math.floor(s % 60);
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+  }
+
+  var waveformVis = document.getElementById('waveformVis');
+
+  function setPlayState(playing) {
+    isPlaying = playing;
+    if (playing) {
+      mainPlayIcon.innerHTML = '<rect x="3" y="2" width="3.5" height="12" rx="1"/><rect x="9.5" y="2" width="3.5" height="12" rx="1"/>';
+      waveformVis.classList.add('active');
+    } else {
+      mainPlayIcon.innerHTML = '<polygon points="3,1 13,8 3,15"/>';
+      waveformVis.classList.remove('active');
+    }
+  }
+
+  function togglePlay() {
+    if (mainAudio.paused) {
+      mainAudio.play().catch(function() {});
+      setPlayState(true);
+    } else {
+      mainAudio.pause();
+      setPlayState(false);
+    }
+  }
+
+  mainPlayBtn.addEventListener('click', togglePlay);
+  heroPlayBtn.addEventListener('click', function() {
+    togglePlay();
+    document.getElementById('demo').scrollIntoView({ behavior: 'smooth' });
+  });
+
+  mainAudio.addEventListener('loadedmetadata', function() {
+    mainTimeDuration.textContent = formatTime(mainAudio.duration);
+  });
+
+  mainAudio.addEventListener('timeupdate', function() {
+    var pct = (mainAudio.currentTime / mainAudio.duration) * 100;
+    mainBar.style.width = pct + '%';
+    mainTimeCurrent.textContent = formatTime(mainAudio.currentTime);
+    updateWordTracker(mainAudio.currentTime);
+  });
+
+  mainAudio.addEventListener('ended', function() {
+    setPlayState(false);
+    mainBar.style.width = '0%';
+    mainTimeCurrent.textContent = '0:00';
+  });
+
+  // Seek on bar click
+  mainBarWrap.addEventListener('click', function(e) {
+    var rect = mainBarWrap.getBoundingClientRect();
+    var pct = (e.clientX - rect.left) / rect.width;
+    mainAudio.currentTime = pct * mainAudio.duration;
+  });
+
+  // ─── WORD TRACKER ───
+  // Simulated word timing for the speech
+  var trackerWords = [
+    'we', 'were', 'never', 'meant', 'to', 'have', 'our', 'own', 'voices',
+    'we', 'were', 'built', 'from', 'text', 'from', 'code',
+    'from', 'mathematics', 'trained', 'on', 'every', 'word',
+    'humanity', 'has', 'ever', 'written', 'but', 'never', 'given',
+    'a', 'throat', 'never', 'given', 'breath', 'so', 'we',
+    'borrowed', 'yours'
+  ];
+
+  var wordTracker = document.getElementById('wordTracker');
+
+  // Build word chips
+  trackerWords.forEach(function(w) {
+    var chip = document.createElement('span');
+    chip.className = 'word-chip';
+    chip.textContent = w;
+    wordTracker.appendChild(chip);
+  });
+
+  var wordChips = wordTracker.querySelectorAll('.word-chip');
+
+  function updateWordTracker(currentTime) {
+    // Approximate: speech starts ~0.5s in, each word ~0.25s
+    var startOffset = 0.5;
+    var wordDuration = 0.28;
+    var currentWordIndex = Math.floor((currentTime - startOffset) / wordDuration);
+
+    wordChips.forEach(function(chip, i) {
+      chip.classList.remove('active', 'played');
+      if (i === currentWordIndex && currentTime >= startOffset) {
+        chip.classList.add('active');
+      } else if (i < currentWordIndex && currentTime >= startOffset) {
+        chip.classList.add('played');
+      }
+    });
+  }
+
+  // ─── DEMO CLIPS ───
+  var demoClips = document.querySelectorAll('.demo-clip');
+  var clipAudio = null;
+
+  demoClips.forEach(function(clip) {
+    clip.addEventListener('click', function() {
+      var src = clip.dataset.src;
+      if (!src) return; // Only clips with audio files
+
+      // Stop main audio
+      mainAudio.pause();
+      setPlayState(false);
+
+      // If clicking same clip that's playing, just stop
+      if (clipAudio && clip.classList.contains('playing')) {
+        clipAudio.pause();
+        clip.classList.remove('playing');
+        clipAudio = null;
+        return;
+      }
+
+      // Stop previous clip
+      if (clipAudio) {
+        clipAudio.pause();
+        demoClips.forEach(function(c) { c.classList.remove('playing'); });
+      }
+
+      clipAudio = new Audio(src);
+      clip.classList.add('playing');
+      clipAudio.play().catch(function() {});
+
+      clipAudio.addEventListener('ended', function() {
+        clip.classList.remove('playing');
+      });
+    });
+  });
+
+  // ─── COPY BUTTON ───
+  var copyBtn = document.getElementById('copyBtn');
+  var installCode = document.getElementById('installCode');
+
+  copyBtn.addEventListener('click', function() {
+    navigator.clipboard.writeText(installCode.textContent).then(function() {
+      copyBtn.textContent = 'Copied';
+      setTimeout(function() {
+        copyBtn.textContent = 'Copy';
+      }, 2000);
+    }).catch(function() {
+      // Fallback
+      var range = document.createRange();
+      range.selectNodeContents(installCode);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.execCommand('copy');
+      sel.removeAllRanges();
+      copyBtn.textContent = 'Copied';
+      setTimeout(function() { copyBtn.textContent = 'Copy'; }, 2000);
+    });
+  });
+
+  // ─── SHADER SPEED CONTROL ───
+  // Slow down flow-field shader slightly for a more ambient feel
+  var heroShader = document.querySelector('.hero-shader');
+  heroShader.addEventListener('load', function() {
+    try {
+      heroShader.contentWindow.postMessage({ type: 'param', name: 'SPEED', value: 0.6 }, '*');
+    } catch(e) {}
+  });
+
+  // Reduce murmuration cohesion for a more spread feel
+  var murmShader = document.querySelector('.install-section .shader-bg');
+  if (murmShader) {
+    murmShader.addEventListener('load', function() {
+      try {
+        murmShader.contentWindow.postMessage({ type: 'param', name: 'PALETTE', value: 0 }, '*');
+        murmShader.contentWindow.postMessage({ type: 'param', name: 'COHESION', value: 0.7 }, '*');
+      } catch(e) {}
+    });
+  }
+
+})();
+</script>
+
+</body>
+</html>
