@@ -18,7 +18,7 @@ Then:
 yt-tts "the meaning of life"
 ```
 
-That's it. Each word gets sourced from a different YouTube video and stitched into a single MP3.
+Each word gets sourced from a different YouTube video and stitched into a single MP3.
 
 ## What it does
 
@@ -39,6 +39,10 @@ No YouTube API key. No cloud ASR. Everything runs locally.
 # Basic synthesis
 yt-tts "hello world"
 yt-tts "never gonna give you up" -o output.mp3
+
+# Multi-speaker mode: each chunk from a different video
+yt-tts --max-chunk 3 "welcome to the future"
+yt-tts --word-by-word "hello world"    # every word from a different speaker
 
 # Use a specific video (no index needed)
 yt-tts --video "https://youtube.com/watch?v=VIDEO_ID" "phrase from that video"
@@ -69,7 +73,7 @@ yt-tts index stats
 
 ## Agent Integration
 
-The installer symlinks the yt-tts skill to `~/.claude/skills/` and `~/.agents/skills/`. Any agent that reads skills from those directories can use yt-tts to generate audio.
+The installer sets up the yt-tts skill for Claude Code (`~/.claude/skills/`), Codex CLI (`~/.codex/skills/`), and the shared `~/.agents/skills/` directory. Any agent that reads skills from those directories can use yt-tts to generate audio.
 
 ```bash
 # Agents should use --json for structured output
@@ -111,6 +115,9 @@ Options:
   --voice CHANNEL        Constrain clips to one channel
   -o PATH                Output file ('-' for stdout)
   --format {mp3,wav}     Output format (default: mp3)
+  --max-chunk N          Max words per chunk (forces multi-speaker stitching)
+  --word-by-word         Every word from a different video (alias for --max-chunk 1)
+  --tightness MODE       Clip tightness: tight (default), normal, loose, or ms value
   --no-cache             Disable caching
   --no-crossfade         Hard cuts between clips
   --json                 Structured JSON output
@@ -130,11 +137,11 @@ Subcommands:
 ## How It Works
 
 ```
-Text → chunk (greedy longest-match)
+Text → chunk (greedy longest-match, or --max-chunk N for multi-speaker)
   → search FTS5 index → download audio (yt-dlp)
   → CTC forced alignment (known text → ~30ms word boundaries)
-  → extract clip (ffmpeg) → ASR verify → retry next candidate if wrong
-  → stitch (gentle loudnorm ±6 LU + crossfade) → MP3/WAV
+  → extract clip (ffmpeg, tight 30ms padding) → ASR verify (80% threshold)
+  → retry next candidate if wrong → stitch (loudnorm ±6 LU + crossfade) → MP3/WAV
 ```
 
 ## Python API
