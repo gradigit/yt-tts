@@ -354,10 +354,9 @@ def _stitch_filter_complex(
     n_streams = len(inputs)
     labels = [f"[{i}:a]" for i in range(n_streams)]
 
-    if crossfade_ms > 0 and all(g == 0 for g in gaps) and len(clips) >= 2:
-        # Chain acrossfade between adjacent clips (no silence gaps)
+    if crossfade_ms > 0 and len(clips) >= 2 and all(g == 0 for g in gaps):
+        # All-zero-gap fast path: chain acrossfade between all clips
         cf_s = crossfade_ms / 1000.0
-        # Build chain: [0:a][1:a]acrossfade=...[cf0]; [cf0][2:a]acrossfade=...[cf1]; ...
         prev = "[0:a]"
         parts = []
         for i in range(1, len(clips)):
@@ -367,6 +366,7 @@ def _stitch_filter_complex(
         filter_complex = ";".join(parts)
     else:
         # General case: concat all inputs (clips + silence interleaved)
+        # Use simple concat — crossfade handled in iterative path for complex cases
         filter_complex = "".join(labels) + f"concat=n={n_streams}:v=0:a=1[out]"
 
     if ext == "mp3":
@@ -412,10 +412,22 @@ def _stitch_iterative(
             segments.append(generate_silence(gap_ms, config))
         segments.append(clips[i])
 
-    # Iteratively merge pairs
+    # Iteratively merge pairs — apply crossfade between real clips, not silence
     current = segments[0]
+    clip_indices = {0}  # track which segment indices are real clips (not silence)
+    idx = 0
+    for i in range(1, len(clips)):
+        gap_ms = gaps[i - 1]
+        if gap_ms > 0:
+            idx += 1  # silence segment
+        idx += 1  # clip segment
+        clip_indices.add(idx)
+
+    prev_is_clip = True
     for i in range(1, len(segments)):
-        # Only apply crossfade between original clip boundaries (not silence)
-        current = _stitch_pair(current, segments[i], 0, config)
+        curr_is_clip = i in clip_indices
+        use_cf = crossfade_ms if (prev_is_clip and curr_is_clip) else 0
+        current = _stitch_pair(current, segments[i], use_cf, config)
+        prev_is_clip = curr_is_clip
 
     return _encode_output(current, config)

@@ -24,6 +24,14 @@ def _verify_clip(clip_path: Path, expected_phrase: str, threshold: float = 0.8) 
     """
     import re
 
+    # Skip verification for single short function words — Whisper tiny can't
+    # reliably recognize isolated sub-500ms words like "the", "a", "of", "in"
+    expected_words = expected_phrase.lower().split()
+    _SKIP_VERIFY_WORDS = {"the", "a", "an", "of", "in", "on", "to", "is", "it", "we", "or", "at", "by", "as", "if", "so", "do", "no", "up", "be", "he", "my"}
+    if len(expected_words) == 1 and expected_words[0] in _SKIP_VERIFY_WORDS:
+        logger.debug("Skipping verification for short function word: '%s'", expected_phrase)
+        return True
+
     try:
         from yt_tts.core.asr import transcribe
 

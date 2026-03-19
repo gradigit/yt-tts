@@ -185,7 +185,8 @@ def _find_phrase_fuzzy(phrase_words: list[str], all_words: list[dict]) -> tuple[
     for i in range(len(all_words) - n + 1):
         window = [_normalize_word(all_words[i + j]["word"]) for j in range(n)]
         score = sum(1 for a, b in zip(window, normalized_phrase) if a == b)
-        if score > best_score and score >= max(1, int(n * 0.7)):
+        min_score = n if n <= 2 else max(2, int(n * 0.7))
+        if score > best_score and score >= min_score:
             best_score = score
             best_match = (i, i + n - 1)
 
