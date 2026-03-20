@@ -33,7 +33,7 @@ def transcribe_and_locate(
 
     # Scale download window with estimate span
     estimate_span_ms = estimated_end_ms - estimated_start_ms
-    padding_ms = max(5000, min(15000, estimate_span_ms * 2))
+    padding_ms = max(8000, min(20000, estimate_span_ms * 3))
     dl_start_ms = max(0, estimated_start_ms - padding_ms)
     dl_end_ms = estimated_end_ms + padding_ms
     dl_duration_s = (dl_end_ms - dl_start_ms) / 1000.0
@@ -83,15 +83,15 @@ def transcribe_and_locate(
                 logger.debug("Forced alignment failed (%s), falling back to ASR", e)
                 from yt_tts.core.asr import transcribe
 
-                model_size = config.asr_model if config else "tiny"
+                # Use 'base' for alignment ASR — tiny is too inaccurate
+                # for locating phrases in noisy/varied YouTube audio
                 backend = config.asr_backend if config else "auto"
-                asr_result = transcribe(tmp_path.as_posix(), model_size=model_size, backend=backend)
+                asr_result = transcribe(tmp_path.as_posix(), model_size="base", backend=backend)
         else:
             from yt_tts.core.asr import transcribe
 
-            model_size = config.asr_model if config else "tiny"
             backend = config.asr_backend if config else "auto"
-            asr_result = transcribe(tmp_path.as_posix(), model_size=model_size, backend=backend)
+            asr_result = transcribe(tmp_path.as_posix(), model_size="base", backend=backend)
 
         all_words = [
             {
