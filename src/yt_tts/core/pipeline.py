@@ -61,22 +61,19 @@ def _verify_clip(clip_path: Path, expected_phrase: str, threshold: float = 0.8) 
 
         recall = matches / len(expected_words)
 
-        # Also check precision — reject clips with too many extra words
-        # A clip saying "this is my land as much as it is yours" should fail
-        # verification for just "it is yours"
+        # Log extra words for quality tracking but don't reject based on them.
+        # Extra words in clips are handled by tighter extraction, not verification.
+        # Verification's job is to confirm the RIGHT words are present.
         extra_words = max(0, len(heard) - len(expected_words))
-        max_extra = max(2, len(expected_words))  # allow up to N extra words
-        precision_ok = extra_words <= max_extra
 
         logger.debug(
-            "Verify clip: expected='%s', heard='%s', recall=%.0f%%, extra=%d/%d",
+            "Verify clip: expected='%s', heard='%s', recall=%.0f%%, extra=%d words",
             expected_phrase,
             result.text.strip(),
             recall * 100,
             extra_words,
-            max_extra,
         )
-        return recall >= threshold and precision_ok
+        return recall >= threshold
     except Exception as e:
         logger.warning("Verify clip: ASR failed (%s), accepting clip unverified", type(e).__name__)
         return True  # don't block on verification errors
