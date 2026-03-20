@@ -2,9 +2,34 @@
 
 from __future__ import annotations
 
+import re
+
 from yt_tts.config import Config
 from yt_tts.core.index import TranscriptIndex
 from yt_tts.types import SearchResult
+
+# Common English words for language detection
+_ENGLISH_WORDS = frozenset({
+    "the", "is", "and", "to", "of", "a", "in", "that", "it", "for",
+    "you", "was", "with", "on", "are", "this", "have", "from", "but",
+    "not", "they", "be", "at", "or", "which", "an", "will", "my",
+    "all", "would", "there", "what", "so", "if", "about", "who",
+    "get", "has", "do", "can", "her", "him", "his", "how", "its",
+    "may", "new", "no", "our", "out", "than", "them", "then", "up",
+})
+
+
+def _is_english_transcript(context_text: str, threshold: float = 0.08) -> bool:
+    """Check if transcript context is predominantly English.
+
+    Uses a simple heuristic: fraction of words that are common English words.
+    Threshold of 0.08 filters out non-English while keeping informal English.
+    """
+    words = set(re.sub(r"[^\w\s]", "", context_text.lower()).split())
+    if len(words) < 5:
+        return True  # too short to determine, assume English
+    overlap = len(words & _ENGLISH_WORDS)
+    return (overlap / len(words)) >= threshold
 
 
 def search_transcripts(
@@ -12,18 +37,20 @@ def search_transcripts(
     index: TranscriptIndex,
     config: Config,
 ) -> SearchResult | None:
-    """Search the index for a phrase. Returns the best match or None.
+    """Search the index for a phrase. Returns the best English match or None.
 
     Applies channel_filter from config if set.
+    Filters out non-English transcripts to avoid multilingual mismatches.
     """
     results = index.search(
         phrase=phrase,
         channel_id=config.channel_filter,
         limit=config.search_limit,
     )
-    if not results:
-        return None
-    return results[0]
+    for r in results:
+        if _is_english_transcript(r.context_text):
+            return r
+    return None
 
 
 def search_transcripts_multi(
@@ -32,16 +59,18 @@ def search_transcripts_multi(
     config: Config,
     limit: int = 5,
 ) -> list[SearchResult]:
-    """Search the index for a phrase. Returns multiple ranked results.
+    """Search the index for a phrase. Returns multiple ranked English results.
 
     Used by the resolver to iterate through candidates when clips fail
     verification (wrong audio, age-restricted video, etc.).
+    Filters out non-English transcripts.
     """
-    return index.search(
+    results = index.search(
         phrase=phrase,
         channel_id=config.channel_filter,
-        limit=limit,
+        limit=limit * 3,  # fetch more to compensate for filtering
     )
+    return [r for r in results if _is_english_transcript(r.context_text)][:limit]
 
 
 def search_live_video(
