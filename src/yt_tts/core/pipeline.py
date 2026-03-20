@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def _verify_and_trim_clip(
-    clip_path: Path, expected_phrase: str, threshold: float = 0.6
+    clip_path: Path, expected_phrase: str, threshold: float = 0.8
 ) -> tuple[bool, Path | None]:
     """Verify a clip contains the expected phrase and trim to just those words.
 
@@ -97,17 +97,25 @@ def _verify_and_trim_clip(
         total_asr_words = len(asr_words)
         extra = total_asr_words - len(expected_clean)
 
+        # Check contiguity: matched words should span a compact window,
+        # not be scattered across a long clip. If the window contains
+        # many more words than expected, the match is probably spurious.
+        window_span = best_end_idx - best_start_idx + 1 if best_start_idx >= 0 else 0
+        contiguity_ok = window_span <= len(expected_clean) * 2  # allow up to 2x gaps
+
         logger.debug(
-            "Verify clip: expected='%s', heard='%s', recall=%.0f%%, matched %d/%d, extra=%d, window=[%d:%d]",
+            "Verify clip: expected='%s', heard='%s', recall=%.0f%%, matched %d/%d, extra=%d, window=[%d:%d], span=%d, contiguous=%s",
             expected_phrase,
             result.text.strip()[:60],
             recall * 100,
             best_score, len(expected_clean),
             extra,
             best_start_idx, best_end_idx,
+            window_span,
+            contiguity_ok,
         )
 
-        if recall < threshold:
+        if recall < threshold or not contiguity_ok:
             return False, None
 
         # Always trim to matched word boundaries if we have timestamps
@@ -206,7 +214,7 @@ def _build_search_fn(config: Config):
             return search_transcripts(phrase, index, config)
 
         def multi_search_fn(phrase: str) -> list[SearchResult]:
-            return search_transcripts_multi(phrase, index, config, limit=5)
+            return search_transcripts_multi(phrase, index, config, limit=10)
 
         return search_fn, multi_search_fn
 
