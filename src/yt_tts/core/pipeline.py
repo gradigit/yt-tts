@@ -40,7 +40,10 @@ def _verify_and_trim_clip(
     try:
         from yt_tts.core.asr import transcribe
 
-        result = transcribe(str(clip_path), model_size="tiny", backend="auto")
+        # Use 'base' model for verification — 'tiny' is too inaccurate,
+        # causing false rejections and missed trimming opportunities.
+        # 'base' adds ~200ms but is much more reliable for word matching.
+        result = transcribe(str(clip_path), model_size="base", backend="auto")
 
         if not result.words:
             # No word timestamps — fall back to text-only check
