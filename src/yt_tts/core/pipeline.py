@@ -75,25 +75,23 @@ def _verify_and_trim_clip(
         for i in range(len(asr_words)):
             # Try to match expected words starting from position i
             score = 0
-            last_matched = i - 1
+            first_match = -1
+            last_match = -1
+            search_from = i
             for exp_word in expected_clean:
-                for j in range(last_matched + 1, min(last_matched + 4, len(asr_words))):
+                for j in range(search_from, min(search_from + 4, len(asr_words))):
                     if asr_words[j][0] == exp_word:
                         score += 1
-                        last_matched = j
+                        if first_match < 0:
+                            first_match = j
+                        last_match = j
+                        search_from = j + 1
                         break
 
-            if score > best_score:
+            if score > best_score and first_match >= 0:
                 best_score = score
-                best_start_idx = i
-                # Find end by matching from start
-                end = i
-                for exp_word in expected_clean:
-                    for j in range(end, min(end + 4, len(asr_words))):
-                        if asr_words[j][0] == exp_word:
-                            end = j + 1
-                            break
-                best_end_idx = end - 1
+                best_start_idx = first_match  # index of FIRST matched word
+                best_end_idx = last_match  # index of LAST matched word
 
         recall = best_score / len(expected_clean)
         total_asr_words = len(asr_words)
@@ -129,19 +127,27 @@ def _verify_and_trim_clip(
             savings = clip_duration - duration
 
             if duration > 0.05 and savings > 0.1:
+                trim_ext = clip_path.suffix or ".m4a"
                 tmp = tempfile.NamedTemporaryFile(
-                    suffix=".m4a", prefix="yt-tts-trim-", delete=False
+                    suffix=trim_ext, prefix="yt-tts-trim-", delete=False
                 )
                 tmp.close()
                 trimmed = Path(tmp.name)
+
+                # Determine output codec based on input format
+                ext = clip_path.suffix.lower()
+                if ext in (".mp3",):
+                    codec_args = ["-c:a", "libmp3lame", "-q:a", "2"]
+                elif ext in (".m4a", ".aac"):
+                    codec_args = ["-c:a", "aac", "-b:a", "128k"]
+                else:
+                    codec_args = ["-c:a", "copy"]
 
                 cmd = [
                     "ffmpeg", "-y", "-i", str(clip_path),
                     "-ss", f"{trim_start:.3f}",
                     "-t", f"{duration:.3f}",
-                    "-c:a", "copy",
-                    str(trimmed),
-                ]
+                ] + codec_args + [str(trimmed)]
                 proc = subprocess.run(cmd, capture_output=True)
                 if proc.returncode == 0 and trimmed.exists() and trimmed.stat().st_size > 0:
                     logger.debug(
