@@ -14,57 +14,53 @@ from yt_tts.types import ClipInfo, SearchResult, SynthesisResult, TimeRange
 logger = logging.getLogger(__name__)
 
 
-def _verify_clip(clip_path: Path, expected_phrase: str, threshold: float = 0.8) -> bool:
-    """Verify a clip actually contains the expected phrase by running ASR on it.
+def _verify_and_trim_clip(
+    clip_path: Path, expected_phrase: str, threshold: float = 0.8
+) -> tuple[bool, Path | None]:
+    """Verify a clip contains the expected phrase and trim extra words.
 
-    Uses sequential word matching (not just bag-of-words) to catch clips
-    that contain the right words in the wrong order or context.
-    Returns True if at least `threshold` fraction of expected words match
-    in sequence. Fast check (~500ms).
+    Returns (passed, trimmed_path):
+    - (True, None) if clip is good as-is (no trimming needed)
+    - (True, trimmed_path) if clip had extra words that were trimmed
+    - (False, None) if clip doesn't contain the expected phrase
     """
     import re
+    import subprocess
+    import tempfile
 
-    # Skip verification for single short function words — Whisper tiny can't
-    # reliably recognize isolated sub-500ms words like "the", "a", "of", "in"
     expected_words = expected_phrase.lower().split()
     _SKIP_VERIFY_WORDS = {"the", "a", "an", "of", "in", "on", "to", "is", "it", "we", "or", "at", "by", "as", "if", "so", "do", "no", "up", "be", "he", "my"}
     if len(expected_words) == 1 and expected_words[0] in _SKIP_VERIFY_WORDS:
         logger.debug("Skipping verification for short function word: '%s'", expected_phrase)
-        return True
+        return True, None
 
     try:
         from yt_tts.core.asr import transcribe
 
+        # Transcribe with word timestamps so we can trim
         result = transcribe(str(clip_path), model_size="tiny", backend="auto")
         heard = re.sub(r"[^\w\s']", "", result.text.lower()).split()
-        expected_words = re.sub(r"[^\w\s']", "", expected_phrase.lower()).split()
+        expected_clean = re.sub(r"[^\w\s']", "", expected_phrase.lower()).split()
 
-        if not expected_words:
-            return True
+        if not expected_clean:
+            return True, None
 
-        # Longest common subsequence — counts words that match in order
-        # but allows gaps (skipped words) in both sequences
+        # Match expected words in heard sequence
         matches = 0
+        matched_indices = []
         h_idx = 0
-        for exp_word in expected_words:
-            found = False
+        for exp_word in expected_clean:
             search_start = h_idx
             while search_start < len(heard):
                 if heard[search_start] == exp_word:
                     matches += 1
+                    matched_indices.append(search_start)
                     h_idx = search_start + 1
-                    found = True
                     break
                 search_start += 1
-            # If not found, don't advance h_idx — keep looking from same position
-            # for the next expected word
 
-        recall = matches / len(expected_words)
-
-        # Log extra words for quality tracking but don't reject based on them.
-        # Extra words in clips are handled by tighter extraction, not verification.
-        # Verification's job is to confirm the RIGHT words are present.
-        extra_words = max(0, len(heard) - len(expected_words))
+        recall = matches / len(expected_clean)
+        extra_words = max(0, len(heard) - len(expected_clean))
 
         logger.debug(
             "Verify clip: expected='%s', heard='%s', recall=%.0f%%, extra=%d words",
@@ -73,10 +69,60 @@ def _verify_clip(clip_path: Path, expected_phrase: str, threshold: float = 0.8) 
             recall * 100,
             extra_words,
         )
-        return recall >= threshold
+
+        if recall < threshold:
+            return False, None
+
+        # If clip has extra words and we have word timestamps, trim it
+        if extra_words > max(1, len(expected_clean) // 2) and result.words and matched_indices:
+            # Find the time range of matched words
+            first_match_idx = matched_indices[0]
+            last_match_idx = matched_indices[-1]
+
+            # Get word timestamps from ASR result
+            if first_match_idx < len(result.words) and last_match_idx < len(result.words):
+                trim_start = result.words[first_match_idx].start
+                trim_end = result.words[last_match_idx].end
+
+                # Add small padding
+                trim_start = max(0, trim_start - 0.03)
+                trim_end = trim_end + 0.05
+
+                duration = trim_end - trim_start
+                if duration > 0.1:
+                    # Trim the clip with ffmpeg
+                    tmp = tempfile.NamedTemporaryFile(
+                        suffix=".m4a", prefix="yt-tts-trim-", delete=False
+                    )
+                    tmp.close()
+                    trimmed = Path(tmp.name)
+
+                    cmd = [
+                        "ffmpeg", "-y", "-i", str(clip_path),
+                        "-ss", f"{trim_start:.3f}",
+                        "-t", f"{duration:.3f}",
+                        "-c:a", "copy",
+                        str(trimmed),
+                    ]
+                    proc = subprocess.run(cmd, capture_output=True)
+                    if proc.returncode == 0 and trimmed.exists() and trimmed.stat().st_size > 0:
+                        logger.debug(
+                            "Trimmed clip: %.2f-%.2fs (removed %d extra words)",
+                            trim_start, trim_end, extra_words,
+                        )
+                        return True, trimmed
+
+        return True, None
+
     except Exception as e:
         logger.warning("Verify clip: ASR failed (%s), accepting clip unverified", type(e).__name__)
-        return True  # don't block on verification errors
+        return True, None
+
+
+def _verify_clip(clip_path: Path, expected_phrase: str, threshold: float = 0.8) -> bool:
+    """Verify a clip contains the expected phrase. Legacy wrapper."""
+    passed, _ = _verify_and_trim_clip(clip_path, expected_phrase, threshold)
+    return passed
 
 
 def _make_output_path(text: str, config: Config) -> Path:
@@ -380,13 +426,17 @@ def _build_resolve_fn(config: Config):
             return None
 
         # Verify the clip actually contains the expected phrase
-        if not _verify_clip(clip_path, phrase):
+        # Also trim extra words if present
+        passed, trimmed_path = _verify_and_trim_clip(clip_path, phrase)
+        if not passed:
             logger.warning(
                 "Clip verification failed for '%s' from %s — wrong audio",
                 phrase,
                 video_id,
             )
             return None
+        if trimmed_path is not None:
+            clip_path = trimmed_path
 
         return ClipInfo(
             video_id=video_id,
