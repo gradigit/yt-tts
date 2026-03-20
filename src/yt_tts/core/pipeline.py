@@ -15,14 +15,17 @@ logger = logging.getLogger(__name__)
 
 
 def _verify_and_trim_clip(
-    clip_path: Path, expected_phrase: str, threshold: float = 0.8
+    clip_path: Path, expected_phrase: str, threshold: float = 0.6
 ) -> tuple[bool, Path | None]:
-    """Verify a clip contains the expected phrase and trim extra words.
+    """Verify a clip contains the expected phrase and trim to just those words.
+
+    Uses ASR word-level timestamps to precisely cut the clip down to only
+    the target phrase, removing any extra words at the start/end.
 
     Returns (passed, trimmed_path):
-    - (True, None) if clip is good as-is (no trimming needed)
-    - (True, trimmed_path) if clip had extra words that were trimmed
-    - (False, None) if clip doesn't contain the expected phrase
+    - (True, None) if clip is clean (no trimming needed)
+    - (True, trimmed_path) if clip was trimmed to the target phrase
+    - (False, None) if target phrase not found in clip audio
     """
     import re
     import subprocess
@@ -37,80 +40,115 @@ def _verify_and_trim_clip(
     try:
         from yt_tts.core.asr import transcribe
 
-        # Transcribe with word timestamps so we can trim
         result = transcribe(str(clip_path), model_size="tiny", backend="auto")
-        heard = re.sub(r"[^\w\s']", "", result.text.lower()).split()
-        expected_clean = re.sub(r"[^\w\s']", "", expected_phrase.lower()).split()
 
-        if not expected_clean:
+        if not result.words:
+            # No word timestamps — fall back to text-only check
+            heard = re.sub(r"[^\w\s']", "", result.text.lower()).split()
+            expected_clean = re.sub(r"[^\w\s']", "", expected_phrase.lower()).split()
+            if not expected_clean:
+                return True, None
+            overlap = set(expected_clean) & set(heard)
+            recall = len(overlap) / len(expected_clean) if expected_clean else 1
+            logger.debug("Verify (no timestamps): recall=%.0f%%", recall * 100)
+            return recall >= threshold, None
+
+        # Build clean word list with timestamps from ASR
+        asr_words = []
+        for w in result.words:
+            clean = re.sub(r"[^\w']", "", w.word.lower()).strip()
+            if clean:
+                asr_words.append((clean, w.start, w.end))
+
+        expected_clean = [re.sub(r"[^\w']", "", w.lower()).strip() for w in expected_words]
+        expected_clean = [w for w in expected_clean if w]
+
+        if not expected_clean or not asr_words:
             return True, None
 
-        # Match expected words in heard sequence
-        matches = 0
-        matched_indices = []
-        h_idx = 0
-        for exp_word in expected_clean:
-            search_start = h_idx
-            while search_start < len(heard):
-                if heard[search_start] == exp_word:
-                    matches += 1
-                    matched_indices.append(search_start)
-                    h_idx = search_start + 1
-                    break
-                search_start += 1
+        # Find the best matching window in ASR output using sliding window
+        n = len(expected_clean)
+        best_score = 0
+        best_start_idx = -1
+        best_end_idx = -1
 
-        recall = matches / len(expected_clean)
-        extra_words = max(0, len(heard) - len(expected_clean))
+        for i in range(len(asr_words)):
+            # Try to match expected words starting from position i
+            score = 0
+            last_matched = i - 1
+            for exp_word in expected_clean:
+                for j in range(last_matched + 1, min(last_matched + 4, len(asr_words))):
+                    if asr_words[j][0] == exp_word:
+                        score += 1
+                        last_matched = j
+                        break
+
+            if score > best_score:
+                best_score = score
+                best_start_idx = i
+                # Find end by matching from start
+                end = i
+                for exp_word in expected_clean:
+                    for j in range(end, min(end + 4, len(asr_words))):
+                        if asr_words[j][0] == exp_word:
+                            end = j + 1
+                            break
+                best_end_idx = end - 1
+
+        recall = best_score / len(expected_clean)
+        total_asr_words = len(asr_words)
+        extra = total_asr_words - len(expected_clean)
 
         logger.debug(
-            "Verify clip: expected='%s', heard='%s', recall=%.0f%%, extra=%d words",
+            "Verify clip: expected='%s', heard='%s', recall=%.0f%%, matched %d/%d, extra=%d, window=[%d:%d]",
             expected_phrase,
-            result.text.strip(),
+            result.text.strip()[:60],
             recall * 100,
-            extra_words,
+            best_score, len(expected_clean),
+            extra,
+            best_start_idx, best_end_idx,
         )
 
         if recall < threshold:
             return False, None
 
-        # If clip has extra words and we have word timestamps, trim it
-        if extra_words > max(1, len(expected_clean) // 2) and result.words and matched_indices:
-            # Find the time range of matched words
-            first_match_idx = matched_indices[0]
-            last_match_idx = matched_indices[-1]
+        # Always trim to matched word boundaries if we have timestamps
+        # This is the key fix: use ASR word timestamps to cut precisely
+        if best_start_idx >= 0 and best_end_idx >= 0:
+            trim_start = asr_words[best_start_idx][1]  # start time of first matched word
+            trim_end = asr_words[best_end_idx][2]  # end time of last matched word
 
-            # Get word timestamps from ASR result
-            if first_match_idx < len(result.words) and last_match_idx < len(result.words):
-                trim_start = result.words[first_match_idx].start
-                trim_end = result.words[last_match_idx].end
+            # Minimal padding to avoid cutting mid-phoneme
+            trim_start = max(0, trim_start - 0.02)
+            trim_end = trim_end + 0.03
 
-                # Add small padding
-                trim_start = max(0, trim_start - 0.03)
-                trim_end = trim_end + 0.05
+            duration = trim_end - trim_start
 
-                duration = trim_end - trim_start
-                if duration > 0.1:
-                    # Trim the clip with ffmpeg
-                    tmp = tempfile.NamedTemporaryFile(
-                        suffix=".m4a", prefix="yt-tts-trim-", delete=False
+            # Only trim if we'd actually remove something meaningful
+            clip_duration = asr_words[-1][2] if asr_words else 0
+            savings = clip_duration - duration
+
+            if duration > 0.05 and savings > 0.1:
+                tmp = tempfile.NamedTemporaryFile(
+                    suffix=".m4a", prefix="yt-tts-trim-", delete=False
+                )
+                tmp.close()
+                trimmed = Path(tmp.name)
+
+                cmd = [
+                    "ffmpeg", "-y", "-i", str(clip_path),
+                    "-ss", f"{trim_start:.3f}",
+                    "-t", f"{duration:.3f}",
+                    "-c:a", "copy",
+                    str(trimmed),
+                ]
+                proc = subprocess.run(cmd, capture_output=True)
+                if proc.returncode == 0 and trimmed.exists() and trimmed.stat().st_size > 0:
+                    logger.debug(
+                        "Trimmed clip %.2f-%.2fs, saved %.1fs (%d extra words removed)",
+                        trim_start, trim_end, savings, extra,
                     )
-                    tmp.close()
-                    trimmed = Path(tmp.name)
-
-                    cmd = [
-                        "ffmpeg", "-y", "-i", str(clip_path),
-                        "-ss", f"{trim_start:.3f}",
-                        "-t", f"{duration:.3f}",
-                        "-c:a", "copy",
-                        str(trimmed),
-                    ]
-                    proc = subprocess.run(cmd, capture_output=True)
-                    if proc.returncode == 0 and trimmed.exists() and trimmed.stat().st_size > 0:
-                        logger.debug(
-                            "Trimmed clip: %.2f-%.2fs (removed %d extra words)",
-                            trim_start, trim_end, extra_words,
-                        )
-                        return True, trimmed
+                    return True, trimmed
 
         return True, None
 
@@ -119,7 +157,7 @@ def _verify_and_trim_clip(
         return True, None
 
 
-def _verify_clip(clip_path: Path, expected_phrase: str, threshold: float = 0.8) -> bool:
+def _verify_clip(clip_path: Path, expected_phrase: str, threshold: float = 0.6) -> bool:
     """Verify a clip contains the expected phrase. Legacy wrapper."""
     passed, _ = _verify_and_trim_clip(clip_path, expected_phrase, threshold)
     return passed

@@ -48,6 +48,7 @@ class TestVerifyClipSkipFunctionWords:
         """Content words are NOT skipped — ASR verification should run."""
         mock_result = MagicMock()
         mock_result.text = "hello"
+        mock_result.words = []
         mock_transcribe.return_value = mock_result
 
         result = _verify_clip(Path("/tmp/dummy.m4a"), "hello")
@@ -58,6 +59,7 @@ class TestVerifyClipSkipFunctionWords:
     def test_single_content_word_machine_is_verified(self, mock_transcribe):
         mock_result = MagicMock()
         mock_result.text = "machine"
+        mock_result.words = []
         mock_transcribe.return_value = mock_result
 
         result = _verify_clip(Path("/tmp/dummy.m4a"), "machine")
@@ -69,6 +71,7 @@ class TestVerifyClipSkipFunctionWords:
         """Multi-word phrases always get verified regardless of content."""
         mock_result = MagicMock()
         mock_result.text = "the quick"
+        mock_result.words = []
         mock_transcribe.return_value = mock_result
 
         result = _verify_clip(Path("/tmp/dummy.m4a"), "the quick")
@@ -80,6 +83,7 @@ class TestVerifyClipSkipFunctionWords:
         """Even if every word is a function word, multi-word phrases get verified."""
         mock_result = MagicMock()
         mock_result.text = "is it"
+        mock_result.words = []
         mock_transcribe.return_value = mock_result
 
         result = _verify_clip(Path("/tmp/dummy.m4a"), "is it")
@@ -91,6 +95,7 @@ class TestVerifyClipSkipFunctionWords:
         """When ASR hears something completely different, verification fails."""
         mock_result = MagicMock()
         mock_result.text = "completely different words here"
+        mock_result.words = []  # no word timestamps
         mock_transcribe.return_value = mock_result
 
         result = _verify_clip(Path("/tmp/dummy.m4a"), "hello world")
