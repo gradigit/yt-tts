@@ -15,12 +15,13 @@ logger = logging.getLogger(__name__)
 
 
 def _verify_and_trim_clip(
-    clip_path: Path, expected_phrase: str, threshold: float = 0.8
+    clip_path: Path, expected_phrase: str, threshold: float = 0.9
 ) -> tuple[bool, Path | None]:
     """Verify a clip contains the expected phrase and trim to just those words.
 
     Uses ASR word-level timestamps to precisely cut the clip down to only
     the target phrase, removing any extra words at the start/end.
+    After trimming, re-verifies the trimmed clip to ensure it's clean.
 
     Returns (passed, trimmed_path):
     - (True, None) if clip is clean (no trimming needed)
@@ -40,10 +41,10 @@ def _verify_and_trim_clip(
     try:
         from yt_tts.core.asr import transcribe
 
-        # Use 'base' model for verification — good balance of accuracy
-        # and speed. 'small' is more accurate but too strict, causing
-        # more rejections and worse fallback clips with limited index.
-        result = transcribe(str(clip_path), model_size="base", backend="auto")
+        # Use 'small' model for verification — must match what the
+        # listener actually hears. Base model accepts clips that sound
+        # wrong to the listener, producing B-grade output.
+        result = transcribe(str(clip_path), model_size="small", backend="auto")
 
         if not result.words:
             # No word timestamps — fall back to text-only check
@@ -165,11 +166,38 @@ def _verify_and_trim_clip(
                 ] + codec_args + [str(trimmed)]
                 proc = subprocess.run(cmd, capture_output=True)
                 if proc.returncode == 0 and trimmed.exists() and trimmed.stat().st_size > 0:
+                    # Re-verify the trimmed clip to ensure it's clean
+                    recheck = transcribe(str(trimmed), model_size="small", backend="auto")
+                    recheck_words = [re.sub(r"[^\w']", "", w.word.lower()).strip()
+                                     for w in recheck.words if re.sub(r"[^\w']", "", w.word.lower()).strip()]
+
+                    recheck_score = 0
+                    ri = 0
+                    for ew in expected_clean:
+                        if ri < len(recheck_words) and recheck_words[ri] == ew:
+                            recheck_score += 1
+                            ri += 1
+
+                    recheck_recall = recheck_score / len(expected_clean) if expected_clean else 1
+                    recheck_extra = len(recheck_words) - len(expected_clean)
+
                     logger.debug(
-                        "Trimmed clip %.2f-%.2fs, saved %.1fs (%d extra words removed)",
-                        trim_start, trim_end, savings, extra,
+                        "Re-verify trimmed: recall=%.0f%%, extra=%d, heard='%s'",
+                        recheck_recall * 100, recheck_extra,
+                        " ".join(recheck_words[:10]),
                     )
-                    return True, trimmed
+
+                    if recheck_recall >= threshold and recheck_extra <= 1:
+                        logger.debug(
+                            "Trimmed clip %.2f-%.2fs, saved %.1fs (%d extra words removed)",
+                            trim_start, trim_end, savings, extra,
+                        )
+                        return True, trimmed
+                    else:
+                        # Trimmed clip still not clean enough — reject
+                        logger.debug("Trimmed clip still has errors, rejecting")
+                        trimmed.unlink(missing_ok=True)
+                        return False, None
 
         return True, None
 
@@ -178,7 +206,7 @@ def _verify_and_trim_clip(
         return True, None
 
 
-def _verify_clip(clip_path: Path, expected_phrase: str, threshold: float = 0.6) -> bool:
+def _verify_clip(clip_path: Path, expected_phrase: str, threshold: float = 0.9) -> bool:
     """Verify a clip contains the expected phrase. Legacy wrapper."""
     passed, _ = _verify_and_trim_clip(clip_path, expected_phrase, threshold)
     return passed
@@ -221,7 +249,7 @@ def _build_search_fn(config: Config):
             return search_transcripts(phrase, index, config)
 
         def multi_search_fn(phrase: str) -> list[SearchResult]:
-            return search_transcripts_multi(phrase, index, config, limit=10)
+            return search_transcripts_multi(phrase, index, config, limit=20)
 
         return search_fn, multi_search_fn
 
