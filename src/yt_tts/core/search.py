@@ -19,11 +19,12 @@ _ENGLISH_WORDS = frozenset({
 })
 
 
-def _is_english_transcript(context_text: str, threshold: float = 0.08) -> bool:
+def _is_english_transcript(context_text: str, threshold: float = 0.15) -> bool:
     """Check if transcript context is predominantly English.
 
     Uses a simple heuristic: fraction of words that are common English words.
-    Threshold of 0.08 filters out non-English while keeping informal English.
+    Threshold of 0.15 ensures the transcript is actually English, not just
+    a non-English transcript with a few English loanwords or phrases.
     """
     words = set(re.sub(r"[^\w\s]", "", context_text.lower()).split())
     if len(words) < 5:
@@ -68,7 +69,7 @@ def search_transcripts_multi(
     results = index.search(
         phrase=phrase,
         channel_id=config.channel_filter,
-        limit=limit * 3,  # fetch more to compensate for filtering
+        limit=limit * 5,  # fetch more to compensate for English filtering
     )
     return [r for r in results if _is_english_transcript(r.context_text)][:limit]
 
