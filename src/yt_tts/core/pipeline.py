@@ -433,15 +433,24 @@ def _build_resolve_fn(config: Config):
                 try:
                     from yt_tts.core.align import transcribe_and_locate
 
-                    # Try the estimated window first, then shift forward
-                    # More shifts for longer videos where estimation can be way off
-                    for shift in (0, 15000, 30000, 60000, 120000):
+                    # Try the estimated window first, then search outward
+                    # in both directions. Bidirectional because the estimate
+                    # can overshoot (music intros, variable speech rate).
+                    shifts = [0, 15000, -15000, 30000, -30000, 60000, -60000, 120000, -120000, 180000, -180000]
+                    for shift in shifts:
+                        # Skip negative shifts that would go before video start
+                        if est.start_ms + shift < 0:
+                            continue
                         # Recompute known_text window for each shift
                         # (~2.5 words/sec is typical speech rate)
-                        if shift > 0 and all_words:
-                            shift_words = int(shift / 1000 * 2.5)
-                            sw = max(0, word_idx - window + shift_words)
-                            ew = min(total, word_idx + window + shift_words)
+                        if shift != 0 and all_words:
+                            shift_words = int(abs(shift) / 1000 * 2.5)
+                            if shift > 0:
+                                sw = max(0, word_idx - window + shift_words)
+                                ew = min(total, word_idx + window + shift_words)
+                            else:
+                                sw = max(0, word_idx - window - shift_words)
+                                ew = min(total, word_idx + window - shift_words)
                             known_text = " ".join(all_words[sw:ew])
                         time_range = transcribe_and_locate(
                             video_id,
@@ -458,6 +467,26 @@ def _build_resolve_fn(config: Config):
                         )
                 except Exception as e:
                     logger.warning("Whisper alignment failed for %s: %s", video_id, e)
+
+            # Full-video scan fallback: if all shifts failed, scan a large
+            # chunk of the video with ASR (no known_text, pure transcription)
+            if time_range is None and est is not None:
+                logger.info("All shifts failed for '%s', scanning wider range", phrase)
+                try:
+                    from yt_tts.core.align import transcribe_and_locate
+
+                    # Scan from video start to 2x the estimated position
+                    scan_end = min(est.end_ms * 2, est.start_ms + 300000)
+                    time_range = transcribe_and_locate(
+                        video_id, phrase,
+                        0, scan_end,
+                        config=config, known_text=None,
+                    )
+                    if time_range is not None:
+                        logger.info("Found '%s' via full scan at %d-%dms",
+                                   phrase, time_range.start_ms, time_range.end_ms)
+                except Exception as e:
+                    logger.debug("Full scan failed: %s", e)
 
         if time_range is None:
             logger.warning("Could not locate '%s' in video %s", phrase, video_id)
