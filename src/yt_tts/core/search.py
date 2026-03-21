@@ -41,15 +41,21 @@ def search_transcripts(
     """Search the index for a phrase. Returns the best English match or None.
 
     Applies channel_filter from config if set.
-    Filters out non-English transcripts to avoid multilingual mismatches.
+    Filters out non-English transcripts using full transcript text.
     """
     results = index.search(
         phrase=phrase,
         channel_id=config.channel_filter,
         limit=config.search_limit,
     )
+    conn = index._get_conn()
     for r in results:
-        if _is_english_transcript(r.context_text):
+        # Check full transcript text, not just context snippet
+        row = conn.execute(
+            "SELECT text FROM transcripts WHERE video_id = ?",
+            (r.video_id,),
+        ).fetchone()
+        if row and _is_english_transcript(row["text"][:1000]):
             return r
     return None
 
@@ -69,9 +75,20 @@ def search_transcripts_multi(
     results = index.search(
         phrase=phrase,
         channel_id=config.channel_filter,
-        limit=limit * 5,  # fetch more to compensate for English filtering
+        limit=limit * 7,  # fetch 7x because ~1/7 transcripts are English
     )
-    return [r for r in results if _is_english_transcript(r.context_text)][:limit]
+    conn = index._get_conn()
+    filtered = []
+    for r in results:
+        row = conn.execute(
+            "SELECT text FROM transcripts WHERE video_id = ?",
+            (r.video_id,),
+        ).fetchone()
+        if row and _is_english_transcript(row["text"][:1000]):
+            filtered.append(r)
+            if len(filtered) >= limit:
+                break
+    return filtered
 
 
 def search_live_video(
