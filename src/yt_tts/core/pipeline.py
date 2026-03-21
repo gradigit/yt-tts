@@ -82,7 +82,7 @@ def _verify_and_trim_clip(
             last_match = -1
             search_from = i
             for exp_word in expected_clean:
-                for j in range(search_from, min(search_from + 4, len(asr_words))):
+                for j in range(search_from, min(search_from + 3, len(asr_words))):
                     if asr_words[j][0] == exp_word:
                         score += 1
                         if first_match < 0:
@@ -104,7 +104,11 @@ def _verify_and_trim_clip(
         # not be scattered across a long clip. If the window contains
         # many more words than expected, the match is probably spurious.
         window_span = best_end_idx - best_start_idx + 1 if best_start_idx >= 0 else 0
-        contiguity_ok = window_span <= len(expected_clean) * 2  # allow up to 2x gaps
+        # Strict contiguity: the matched window should be at most 1 word
+        # longer than the expected phrase. This rejects clips with inserted
+        # words like "the TWO pieces" when we want "the pieces".
+        max_span = len(expected_clean) + max(1, len(expected_clean) // 4)
+        contiguity_ok = window_span <= max_span
 
         logger.debug(
             "Verify clip: expected='%s', heard='%s', recall=%.0f%%, matched %d/%d, extra=%d, window=[%d:%d], span=%d, contiguous=%s",
