@@ -166,9 +166,6 @@ class TranscriptIndex:
         # Use FTS5 quoted phrase syntax for exact phrase matching.
         fts_query = f'"{phrase}"'
         try:
-            # Filter to English transcripts at the SQL level — the index
-            # contains transcripts in 7 languages (en/es/nl/ru/it/de/fr)
-            # from YouTube-Commons, and only ~70% are English.
             if channel_id:
                 rows = conn.execute(
                     "SELECT t.video_id, t.channel_id, t.channel_name, t.title, t.text, "
@@ -176,7 +173,6 @@ class TranscriptIndex:
                     "FROM transcripts_fts f "
                     "JOIN transcripts t ON t.id = f.rowid "
                     "WHERE transcripts_fts MATCH ? AND t.channel_id = ? "
-                    "AND t.language LIKE 'en%' "
                     "ORDER BY f.rank "
                     "LIMIT ?",
                     (fts_query, channel_id, limit * 5),
@@ -188,7 +184,6 @@ class TranscriptIndex:
                     "FROM transcripts_fts f "
                     "JOIN transcripts t ON t.id = f.rowid "
                     "WHERE transcripts_fts MATCH ? "
-                    "AND t.language LIKE 'en%' "
                     "ORDER BY f.rank "
                     "LIMIT ?",
                     (fts_query, limit * 5),
