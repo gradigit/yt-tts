@@ -137,7 +137,7 @@ def _verify_and_trim_clip(
             clip_duration = asr_words[-1][2] if asr_words else 0
             savings = clip_duration - duration
 
-            if duration > 0.05 and savings > 0.1:
+            if duration > 0.05 and savings > 0.02:
                 trim_ext = clip_path.suffix or ".m4a"
                 tmp = tempfile.NamedTemporaryFile(
                     suffix=trim_ext, prefix="yt-tts-trim-", delete=False
