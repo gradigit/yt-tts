@@ -40,11 +40,10 @@ def _verify_and_trim_clip(
     try:
         from yt_tts.core.asr import transcribe
 
-        # Use 'small' model for verification — must match the benchmark
-        # model to avoid discrepancies where verification passes but
-        # the final audio has errors. Adds ~500ms per clip but ensures
-        # what we verify matches what listeners will hear.
-        result = transcribe(str(clip_path), model_size="small", backend="auto")
+        # Use 'base' model for verification — good balance of accuracy
+        # and speed. 'small' is more accurate but too strict, causing
+        # more rejections and worse fallback clips with limited index.
+        result = transcribe(str(clip_path), model_size="base", backend="auto")
 
         if not result.words:
             # No word timestamps — fall back to text-only check
