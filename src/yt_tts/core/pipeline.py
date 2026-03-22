@@ -554,6 +554,23 @@ def _build_resolve_fn(config: Config):
         if trimmed_path is not None:
             clip_path = trimmed_path
 
+        # Score the final clip quality by re-transcribing and comparing
+        # This confidence drives the "try more candidates" logic in resolve_chunks
+        import re as _re
+        try:
+            from yt_tts.core.asr import transcribe as _transcribe
+            _result = _transcribe(str(clip_path), model_size="small", backend="auto")
+            _heard = [_re.sub(r"[^\w']", "", w.word.lower()).strip()
+                      for w in _result.words
+                      if _re.sub(r"[^\w']", "", w.word.lower()).strip()]
+            _expected = [_re.sub(r"[^\w']", "", w.lower()).strip()
+                         for w in phrase.split()
+                         if _re.sub(r"[^\w']", "", w.lower()).strip()]
+            from difflib import SequenceMatcher as _SM
+            clip_quality = _SM(None, _expected, _heard).ratio()
+        except Exception:
+            clip_quality = time_range.confidence
+
         return ClipInfo(
             video_id=video_id,
             video_title=result.title,
@@ -561,7 +578,7 @@ def _build_resolve_fn(config: Config):
             start_ms=time_range.start_ms,
             end_ms=time_range.end_ms,
             file_path=clip_path,
-            confidence=time_range.confidence,
+            confidence=clip_quality,
             timestamp_source=timestamp_source,
         )
 

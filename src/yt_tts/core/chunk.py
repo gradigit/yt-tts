@@ -177,9 +177,9 @@ def resolve_chunks(
     if failed_indices and multi_search_fn:
         for idx, phrase in failed_indices:
             candidates = multi_search_fn(phrase)
-            # Skip the first result (already tried)
             tried_ids = {plan.search_results[idx].video_id}
-            resolved = False
+            best_clip = None
+            best_confidence = 0.0
             for candidate in candidates:
                 if candidate.video_id in tried_ids:
                     continue
@@ -188,12 +188,18 @@ def resolve_chunks(
                 try:
                     clip = resolve_fn(phrase, candidate)
                     if clip is not None:
-                        clips[idx] = clip
-                        resolved = True
-                        break
+                        # Keep the clip with highest confidence
+                        if clip.confidence > best_confidence:
+                            best_clip = clip
+                            best_confidence = clip.confidence
+                        # If confidence is very high, stop early
+                        if clip.confidence >= 0.95:
+                            break
                 except Exception:
                     continue
-            if not resolved:
+            if best_clip is not None:
+                clips[idx] = best_clip
+            else:
                 missing_words.extend(_tokenize(phrase))
                 logger.warning(
                     "Failed to resolve chunk '%s' after %d candidates", phrase, len(tried_ids)
